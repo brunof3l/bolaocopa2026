@@ -69,6 +69,7 @@ import type {
   MatchResult,
   Participant,
   Prediction,
+  RankingEntry,
   ResolvedGame,
   StandingEntry,
   Team,
@@ -345,76 +346,116 @@ function StandingsTable({
   standings: StandingEntry[];
 }) {
   return (
-    <div className="min-w-0">
-      <div className="space-y-3 md:hidden">
-        {standings.map((entry) => (
-          <div
-            key={entry.teamId}
-            className="glass-surface rounded-2xl border border-white/8 p-3"
-          >
-            <div className="flex items-center justify-between gap-3">
-              <span className="rounded-full bg-white/5 px-2.5 py-1 text-xs text-slate-300">
-                {entry.position}o
-              </span>
-              <span className="text-sm font-semibold text-emerald-200">
-                {entry.points} pts
-              </span>
-            </div>
-            <div className="mt-3 flex items-center gap-2 font-medium text-white">
-              <CountryFlag code={entry.team.code} name={entry.team.name} />
-              <span>{entry.team.name}</span>
-            </div>
-            <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-slate-300">
-              <div className="rounded-xl bg-white/5 px-2 py-2">J {entry.played}</div>
-              <div className="rounded-xl bg-white/5 px-2 py-2">V {entry.wins}</div>
-              <div className="rounded-xl bg-white/5 px-2 py-2">E {entry.draws}</div>
-              <div className="rounded-xl bg-white/5 px-2 py-2">D {entry.losses}</div>
-              <div className="rounded-xl bg-white/5 px-2 py-2">GP {entry.goalsFor}</div>
-              <div className="rounded-xl bg-white/5 px-2 py-2">SG {entry.goalDifference}</div>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div className="glass-surface premium-scrollbar hidden min-w-0 max-w-full overflow-x-auto rounded-3xl md:block">
-        <table className="min-w-full text-left text-sm">
-          <thead className="bg-white/5 text-slate-300">
-            <tr>
-              <th className="px-3 py-3">Pos</th>
-              <th className="px-3 py-3">Selecao</th>
-              <th className="px-3 py-3">PTS</th>
-              <th className="px-3 py-3">J</th>
-              <th className="px-3 py-3">V</th>
-              <th className="px-3 py-3">E</th>
-              <th className="px-3 py-3">D</th>
-              <th className="px-3 py-3">GP</th>
-              <th className="px-3 py-3">GC</th>
-              <th className="px-3 py-3">SG</th>
+    <div className="glass-surface premium-scrollbar min-w-0 max-w-full overflow-x-auto rounded-3xl">
+      <table className="min-w-[38rem] text-left text-[11px] sm:min-w-full sm:text-xs md:text-sm">
+        <thead className="bg-white/5 text-slate-300">
+          <tr>
+            <th className="px-2 py-2.5 sm:px-3 sm:py-3">Pos</th>
+            <th className="px-2 py-2.5 sm:px-3 sm:py-3">Selecao</th>
+            <th className="px-2 py-2.5 sm:px-3 sm:py-3">PTS</th>
+            <th className="px-2 py-2.5 sm:px-3 sm:py-3">J</th>
+            <th className="px-2 py-2.5 sm:px-3 sm:py-3">V</th>
+            <th className="px-2 py-2.5 sm:px-3 sm:py-3">E</th>
+            <th className="px-2 py-2.5 sm:px-3 sm:py-3">D</th>
+            <th className="px-2 py-2.5 sm:px-3 sm:py-3">GP</th>
+            <th className="px-2 py-2.5 sm:px-3 sm:py-3">GC</th>
+            <th className="px-2 py-2.5 sm:px-3 sm:py-3">SG</th>
+          </tr>
+        </thead>
+        <tbody>
+          {standings.map((entry) => (
+            <tr key={entry.teamId} className="border-t border-white/8 text-slate-200">
+              <td className="px-2 py-2.5 sm:px-3 sm:py-3">{entry.position}</td>
+              <td className="px-2 py-2.5 font-medium text-white sm:px-3 sm:py-3">
+                <span className="inline-flex items-center gap-1.5 sm:gap-2">
+                  <CountryFlag code={entry.team.code} name={entry.team.name} />
+                  {entry.team.shortName}
+                </span>
+              </td>
+              <td className="px-2 py-2.5 sm:px-3 sm:py-3">{entry.points}</td>
+              <td className="px-2 py-2.5 sm:px-3 sm:py-3">{entry.played}</td>
+              <td className="px-2 py-2.5 sm:px-3 sm:py-3">{entry.wins}</td>
+              <td className="px-2 py-2.5 sm:px-3 sm:py-3">{entry.draws}</td>
+              <td className="px-2 py-2.5 sm:px-3 sm:py-3">{entry.losses}</td>
+              <td className="px-2 py-2.5 sm:px-3 sm:py-3">{entry.goalsFor}</td>
+              <td className="px-2 py-2.5 sm:px-3 sm:py-3">{entry.goalsAgainst}</td>
+              <td className="px-2 py-2.5 sm:px-3 sm:py-3">{entry.goalDifference}</td>
             </tr>
-          </thead>
-          <tbody>
-            {standings.map((entry) => (
-              <tr key={entry.teamId} className="border-t border-white/8 text-slate-200">
-                <td className="px-3 py-3">{entry.position}</td>
-                <td className="px-3 py-3 font-medium text-white">
-                  <span className="inline-flex items-center gap-2">
-                    <CountryFlag code={entry.team.code} name={entry.team.name} />
-                    {entry.team.shortName}
-                  </span>
-                </td>
-                <td className="px-3 py-3">{entry.points}</td>
-                <td className="px-3 py-3">{entry.played}</td>
-                <td className="px-3 py-3">{entry.wins}</td>
-                <td className="px-3 py-3">{entry.draws}</td>
-                <td className="px-3 py-3">{entry.losses}</td>
-                <td className="px-3 py-3">{entry.goalsFor}</td>
-                <td className="px-3 py-3">{entry.goalsAgainst}</td>
-                <td className="px-3 py-3">{entry.goalDifference}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function RankingTable({
+  ranking,
+}: {
+  ranking: RankingEntry[];
+}) {
+  return (
+    <div className="min-w-0 max-w-full overflow-x-auto rounded-3xl border border-white/8 bg-black/20">
+      <table className="min-w-[64rem] text-left text-[11px] sm:text-xs md:min-w-full md:text-sm">
+        <thead className="bg-white/5 text-slate-300">
+          <tr>
+            <th className="px-2 py-2.5 font-medium sm:px-3 md:px-4 md:py-3">Pos.</th>
+            <th className="px-2 py-2.5 font-medium sm:px-3 md:px-4 md:py-3">Participante</th>
+            <th className="px-2 py-2.5 font-medium sm:px-3 md:px-4 md:py-3">Ganhos</th>
+            <th className="px-2 py-2.5 font-medium sm:px-3 md:px-4 md:py-3">
+              Acerto de Contas (Liquido)
+            </th>
+            <th className="px-2 py-2.5 font-medium sm:px-3 md:px-4 md:py-3">Ganhos por Jogos</th>
+            <th className="px-2 py-2.5 font-medium sm:px-3 md:px-4 md:py-3">Premios Finais</th>
+            <th className="px-2 py-2.5 font-medium sm:px-3 md:px-4 md:py-3">Cravos</th>
+            <th className="px-2 py-2.5 font-medium sm:px-3 md:px-4 md:py-3">
+              Resultados certos
+            </th>
+            <th className="px-2 py-2.5 font-medium sm:px-3 md:px-4 md:py-3">Campeao</th>
+            <th className="px-2 py-2.5 font-medium sm:px-3 md:px-4 md:py-3">Artilheiro</th>
+          </tr>
+        </thead>
+        <tbody>
+          {ranking.map((entry, index) => (
+            <tr key={entry.userId} className="border-t border-white/8 text-slate-200">
+              <td className="px-2 py-2.5 sm:px-3 md:px-4 md:py-3">{index + 1}</td>
+              <td className="px-2 py-2.5 font-medium text-white sm:px-3 md:px-4 md:py-3">
+                {entry.name}
+              </td>
+              <td className="px-2 py-2.5 font-semibold text-white sm:px-3 md:px-4 md:py-3">
+                {formatCurrency(entry.grossWinnings)}
+              </td>
+              <td className="px-2 py-2.5 sm:px-3 md:px-4 md:py-3">
+                <span
+                  className={`font-semibold ${
+                    entry.netSettlement > 0
+                      ? "text-emerald-300"
+                      : entry.netSettlement < 0
+                        ? "text-rose-300"
+                        : "text-bolao-zero"
+                  }`}
+                >
+                  {entry.netSettlement > 0 ? "+" : ""}
+                  {formatCurrency(entry.netSettlement)} · {entry.settlementLabel}
+                </span>
+              </td>
+              <td className="px-2 py-2.5 sm:px-3 md:px-4 md:py-3">
+                {formatCurrency(entry.matchWinnings)}
+              </td>
+              <td className="px-2 py-2.5 sm:px-3 md:px-4 md:py-3">
+                {formatCurrency(entry.finalAwardsWinnings)}
+              </td>
+              <td className="px-2 py-2.5 sm:px-3 md:px-4 md:py-3">{entry.exactHits}</td>
+              <td className="px-2 py-2.5 sm:px-3 md:px-4 md:py-3">{entry.resultHits}</td>
+              <td className="px-2 py-2.5 sm:px-3 md:px-4 md:py-3">
+                {entry.championHit ? "Sim" : "Nao"}
+              </td>
+              <td className="px-2 py-2.5 sm:px-3 md:px-4 md:py-3">
+                {entry.topScorerHit ? "Sim" : "Nao"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -1207,51 +1248,53 @@ export function BolaoApp({
   return (
     <main className="min-h-screen bg-bolao-bg text-slate-100">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-3 py-4 sm:px-4 sm:py-5 md:gap-6 md:px-6 md:py-8">
-        <header className="glass-surface overflow-hidden rounded-[1.5rem] p-4 md:rounded-[2rem] md:p-8">
-          <div className="grid gap-4 md:gap-6 lg:grid-cols-[1.3fr_0.9fr]">
-            <div>
-              <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-emerald-200 md:mb-4 md:text-xs md:tracking-[0.28em]">
-                <Trophy className="h-4 w-4" />
-                Bolao Copa 2026
+        {currentPage === "menu" && (
+          <header className="glass-surface overflow-hidden rounded-[1.5rem] p-4 md:rounded-[2rem] md:p-8">
+            <div className="grid gap-4 md:gap-6 lg:grid-cols-[1.3fr_0.9fr]">
+              <div>
+                <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-emerald-200 md:mb-4 md:text-xs md:tracking-[0.28em]">
+                  <Trophy className="h-4 w-4" />
+                  Bolao Copa 2026
+                </div>
+                <h1 className="max-w-3xl text-2xl font-semibold leading-tight text-white sm:text-3xl md:text-5xl">
+                  Bolao da Copa com potes compartilhados, rollover e acerto final.
+                </h1>
+                <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300 md:mt-4 md:text-base md:leading-7">
+                  O sistema agora considera 48 selecoes, 12 grupos, classificacao
+                  automatica, 8 melhores terceiros colocados, chaveamento do
+                  mata-mata, potes pari-mutuel por criterio e trava de palpites ate
+                  1 minuto antes do jogo.
+                </p>
+                <div className="mt-3 rounded-2xl border border-white/8 bg-bolao-surfaceElevated/70 px-4 py-3 text-xs text-slate-300 sm:text-sm">
+                  Agora: <span className="font-semibold text-white">{formatFullDateTime(now.toISOString())}</span>
+                </div>
               </div>
-              <h1 className="max-w-3xl text-2xl font-semibold leading-tight text-white sm:text-3xl md:text-5xl">
-                Bolao da Copa com potes compartilhados, rollover e acerto final.
-              </h1>
-              <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300 md:mt-4 md:text-base md:leading-7">
-                O sistema agora considera 48 selecoes, 12 grupos, classificacao
-                automatica, 8 melhores terceiros colocados, chaveamento do
-                mata-mata, potes pari-mutuel por criterio e trava de palpites ate
-                1 minuto antes do jogo.
-              </p>
-              <div className="mt-3 rounded-2xl border border-white/8 bg-bolao-surfaceElevated/70 px-4 py-3 text-xs text-slate-300 sm:text-sm">
-                Agora: <span className="font-semibold text-white">{formatFullDateTime(now.toISOString())}</span>
-              </div>
-            </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <StatCard
-                label="Participantes"
-                value={String(participantList.length)}
-                helper="Grupo fechado para o bolao"
-              />
-              <StatCard
-                label="Jogos cadastrados"
-                value={String(gamesData.length)}
-                helper="72 de grupos + 32 de mata-mata"
-              />
-              <StatCard
-                label="Palpites salvos"
-                value={String(predictionsCount)}
-                helper="Base inicial pronta para testes"
-              />
-              <StatCard
-                label="Jogos finalizados"
-                value={String(finishedGamesCount)}
-                helper="Resultados oficiais inseridos pelo admin"
-              />
+              <div className="grid grid-cols-2 gap-3">
+                <StatCard
+                  label="Participantes"
+                  value={String(participantList.length)}
+                  helper="Grupo fechado para o bolao"
+                />
+                <StatCard
+                  label="Jogos cadastrados"
+                  value={String(gamesData.length)}
+                  helper="72 de grupos + 32 de mata-mata"
+                />
+                <StatCard
+                  label="Palpites salvos"
+                  value={String(predictionsCount)}
+                  helper="Base inicial pronta para testes"
+                />
+                <StatCard
+                  label="Jogos finalizados"
+                  value={String(finishedGamesCount)}
+                  helper="Resultados oficiais inseridos pelo admin"
+                />
+              </div>
             </div>
-          </div>
-        </header>
+          </header>
+        )}
 
         <BolaoNav />
 
@@ -1664,137 +1707,8 @@ export function BolaoApp({
                 </div>
               </div>
 
-              <div className="mt-5 space-y-3 md:hidden">
-                {ranking.map((entry, index) => (
-                  <div
-                    key={entry.userId}
-                    className="rounded-2xl border border-white/8 bg-black/20 p-4"
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-xs uppercase tracking-[0.14em] text-slate-500">
-                          {index + 1}o lugar
-                        </p>
-                        <p className="mt-1 font-semibold text-white">{entry.name}</p>
-                      </div>
-                      <span
-                        className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                          entry.netSettlement > 0
-                            ? "bg-emerald-400/10 text-emerald-200"
-                            : entry.netSettlement < 0
-                              ? "bg-rose-400/10 text-rose-200"
-                              : "bg-white/5 text-slate-300"
-                        }`}
-                      >
-                        {entry.settlementLabel}
-                      </span>
-                    </div>
-                    <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-300">
-                      <div className="rounded-xl bg-white/5 p-3">
-                        <p className="text-slate-500">Ganhos</p>
-                        <p className="mt-1 font-semibold text-white">
-                          {formatCurrency(entry.grossWinnings)}
-                        </p>
-                      </div>
-                      <div className="rounded-xl bg-white/5 p-3">
-                        <p className="text-slate-500">Liquido</p>
-                        <p
-                          className={`mt-1 font-semibold ${
-                            entry.netSettlement > 0
-                              ? "text-emerald-300"
-                              : entry.netSettlement < 0
-                                ? "text-rose-300"
-                                : "text-white"
-                          }`}
-                        >
-                          {entry.netSettlement > 0 ? "+" : ""}
-                          {formatCurrency(entry.netSettlement)}
-                        </p>
-                      </div>
-                      <div className="rounded-xl bg-white/5 p-3">
-                        <p className="text-slate-500">Jogos</p>
-                        <p className="mt-1 font-semibold text-white">
-                          {formatCurrency(entry.matchWinnings)}
-                        </p>
-                      </div>
-                      <div className="rounded-xl bg-white/5 p-3">
-                        <p className="text-slate-500">Premios</p>
-                        <p className="mt-1 font-semibold text-white">
-                          {formatCurrency(entry.finalAwardsWinnings)}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-300">
-                      <span className="rounded-full bg-white/5 px-3 py-1">
-                        Cravos: {entry.exactHits}
-                      </span>
-                      <span className="rounded-full bg-white/5 px-3 py-1">
-                        Resultados: {entry.resultHits}
-                      </span>
-                      <span className="rounded-full bg-white/5 px-3 py-1">
-                        Campeao: {entry.championHit ? "Sim" : "Nao"}
-                      </span>
-                      <span className="rounded-full bg-white/5 px-3 py-1">
-                        Artilheiro: {entry.topScorerHit ? "Sim" : "Nao"}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="mt-5 hidden min-w-0 max-w-full overflow-x-auto rounded-3xl border border-white/8 bg-black/20 md:block">
-                <table className="min-w-full text-left text-sm">
-                  <thead className="bg-white/5 text-slate-300">
-                    <tr>
-                      <th className="px-4 py-3 font-medium">Pos.</th>
-                      <th className="px-4 py-3 font-medium">Participante</th>
-                      <th className="px-4 py-3 font-medium">Ganhos</th>
-                      <th className="px-4 py-3 font-medium">Acerto de Contas (Liquido)</th>
-                      <th className="px-4 py-3 font-medium">Ganhos por Jogos</th>
-                      <th className="px-4 py-3 font-medium">Premios Finais</th>
-                      <th className="px-4 py-3 font-medium">Cravos</th>
-                      <th className="px-4 py-3 font-medium">Resultados certos</th>
-                      <th className="px-4 py-3 font-medium">Campeao</th>
-                      <th className="px-4 py-3 font-medium">Artilheiro</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {ranking.map((entry, index) => (
-                      <tr
-                        key={entry.userId}
-                        className="border-t border-white/8 text-slate-200"
-                      >
-                        <td className="px-4 py-3">{index + 1}</td>
-                        <td className="px-4 py-3 font-medium text-white">{entry.name}</td>
-                        <td className="px-4 py-3 font-semibold text-white">
-                          {formatCurrency(entry.grossWinnings)}
-                        </td>
-                        <td className="px-4 py-3">
-                          <span
-                            className={`font-semibold ${
-                              entry.netSettlement > 0
-                                ? "text-emerald-300"
-                                : entry.netSettlement < 0
-                                  ? "text-rose-300"
-                                  : "text-bolao-zero"
-                            }`}
-                          >
-                            {entry.netSettlement > 0 ? "+" : ""}
-                            {formatCurrency(entry.netSettlement)} · {entry.settlementLabel}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3">{formatCurrency(entry.matchWinnings)}</td>
-                        <td className="px-4 py-3">
-                          {formatCurrency(entry.finalAwardsWinnings)}
-                        </td>
-                        <td className="px-4 py-3">{entry.exactHits}</td>
-                        <td className="px-4 py-3">{entry.resultHits}</td>
-                        <td className="px-4 py-3">{entry.championHit ? "Sim" : "Nao"}</td>
-                        <td className="px-4 py-3">{entry.topScorerHit ? "Sim" : "Nao"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="mt-5">
+                <RankingTable ranking={ranking} />
               </div>
             </SectionCard>
 
