@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   CalendarDays,
   ChevronDown,
@@ -11,6 +12,7 @@ import {
   Lock,
   LogIn,
   Medal,
+  Plus,
   RotateCcw,
   ShieldCheck,
   Swords,
@@ -18,8 +20,11 @@ import {
   Trophy,
   Unlock,
   UserCircle2,
+  X,
 } from "lucide-react";
 
+import { seedUsersIfMissingAction } from "@/app/actions/match-actions";
+import { CountryFlag } from "@/components/country-flag";
 import {
   gamesData,
   groupsData,
@@ -34,7 +39,6 @@ import {
   formatCurrency,
   formatFullDateTime,
   formatKickoff,
-  getFlagEmoji,
   getPrediction,
   getPredictionAvailability,
   getPredictionReward,
@@ -53,6 +57,7 @@ import type {
   AppState,
   GroupId,
   MatchResult,
+  Participant,
   Prediction,
   ResolvedGame,
   StandingEntry,
@@ -60,6 +65,28 @@ import type {
 } from "@/types/bolao";
 
 type TabKey = "acesso" | "palpites" | "ranking" | "admin";
+const LOCAL_STORAGE_PARTICIPANTS_KEY = "bolao-copa-2026-participants";
+const participantAccentPalette = [
+  "#10b981",
+  "#0ea5e9",
+  "#a855f7",
+  "#f59e0b",
+  "#f43f5e",
+  "#3b82f6",
+  "#84cc16",
+  "#ef4444",
+  "#8b5cf6",
+  "#14b8a6",
+  "#eab308",
+  "#fb7185",
+];
+
+const tabTransition = {
+  initial: { opacity: 0, y: 10 },
+  animate: { opacity: 1, y: 0 },
+  exit: { opacity: 0, y: -10 },
+  transition: { duration: 0.24, ease: "easeOut" as const },
+};
 
 const tabs: Array<{
   key: TabKey;
@@ -107,6 +134,67 @@ function parseScoreInput(value: string) {
   return Math.max(0, Math.min(99, Math.trunc(parsed)));
 }
 
+function normalizeParticipantName(value: string) {
+  return value.trim().replace(/\s+/g, " ");
+}
+
+function createParticipantId(name: string, existingParticipants: Participant[]) {
+  const baseId =
+    normalizeParticipantName(name)
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "participante";
+
+  let candidateId = baseId;
+  let suffix = 2;
+
+  while (existingParticipants.some((participant) => participant.id === candidateId)) {
+    candidateId = `${baseId}-${suffix}`;
+    suffix += 1;
+  }
+
+  return candidateId;
+}
+
+function mergeParticipants(
+  existingParticipants: Participant[],
+  incomingNames: string[],
+) {
+  const mergedParticipants = [...existingParticipants];
+
+  for (const rawName of incomingNames) {
+    const normalizedName = normalizeParticipantName(rawName);
+
+    if (!normalizedName) {
+      continue;
+    }
+
+    const alreadyExists = mergedParticipants.some(
+      (participant) =>
+        participant.name.localeCompare(normalizedName, "pt-BR", {
+          sensitivity: "accent",
+        }) === 0,
+    );
+
+    if (alreadyExists) {
+      continue;
+    }
+
+    mergedParticipants.push({
+      id: createParticipantId(normalizedName, mergedParticipants),
+      name: normalizedName,
+      accentColor:
+        participantAccentPalette[
+          mergedParticipants.length % participantAccentPalette.length
+        ],
+    });
+  }
+
+  return mergedParticipants;
+}
+
 function SectionCard({
   title,
   subtitle,
@@ -119,17 +207,17 @@ function SectionCard({
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-3xl border border-white/10 bg-white/5 p-5 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur md:p-6">
+    <section className="glass-surface rounded-3xl p-5 transition-transform duration-300 hover:scale-[1.01] md:p-6">
       <div className="mb-5 flex items-start justify-between gap-4">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.24em] text-emerald-300/80">
+          <p className="text-sm font-semibold uppercase tracking-[0.24em] text-bolao-accent/80">
             {title}
           </p>
           <h2 className="mt-2 text-xl font-semibold text-white md:text-2xl">
             {subtitle}
           </h2>
         </div>
-        <div className="rounded-2xl border border-white/10 bg-black/30 p-3 text-emerald-200">
+        <div className="rounded-2xl border border-white/8 bg-bolao-surfaceElevated/80 p-3 text-emerald-300">
           {icon}
         </div>
       </div>
@@ -148,8 +236,8 @@ function StatCard({
   helper: string;
 }) {
   return (
-    <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
-      <p className="text-sm text-slate-400">{label}</p>
+    <div className="glass-surface rounded-2xl p-4 transition-transform duration-300 hover:scale-[1.02]">
+      <p className="text-sm text-bolao-muted">{label}</p>
       <p className="mt-2 text-2xl font-semibold text-white">{value}</p>
       <p className="mt-1 text-xs text-slate-500">{helper}</p>
     </div>
@@ -169,7 +257,7 @@ function TeamLabel({
 
   return (
     <span className="inline-flex items-center gap-2">
-      <span className="text-lg">{getFlagEmoji(team.code)}</span>
+      <CountryFlag code={team.code} name={team.name} />
       <span>{team.name}</span>
     </span>
   );
@@ -181,7 +269,7 @@ function StandingsTable({
   standings: StandingEntry[];
 }) {
   return (
-    <div className="overflow-x-auto rounded-3xl border border-white/8 bg-black/20">
+    <div className="glass-surface premium-scrollbar overflow-x-auto rounded-3xl">
       <table className="min-w-full text-left text-sm">
         <thead className="bg-white/5 text-slate-300">
           <tr>
@@ -203,7 +291,7 @@ function StandingsTable({
               <td className="px-3 py-3">{entry.position}</td>
               <td className="px-3 py-3 font-medium text-white">
                 <span className="inline-flex items-center gap-2">
-                  <span>{getFlagEmoji(entry.team.code)}</span>
+                  <CountryFlag code={entry.team.code} name={entry.team.name} />
                   {entry.team.shortName}
                 </span>
               </td>
@@ -234,14 +322,17 @@ function BracketColumn({
 }) {
   return (
     <div className="space-y-3">
-      <div className="rounded-2xl border border-white/8 bg-white/5 px-4 py-3">
+      <div className="glass-surface rounded-2xl px-4 py-3">
         <p className="text-sm font-semibold text-white">{title}</p>
       </div>
       {games.map((game) => {
         const result = state.results.find((item) => item.gameId === game.id);
 
         return (
-          <div key={game.id} className="rounded-2xl border border-white/8 bg-black/20 p-4">
+          <div
+            key={game.id}
+            className="glass-surface rounded-2xl p-4 transition-transform duration-300 hover:scale-[1.02]"
+          >
             <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
               Jogo {game.matchNumber}
             </p>
@@ -297,7 +388,7 @@ function PredictionGameCard({
   const isEditable = Boolean(selectedParticipant) && availability.status === "open";
 
   return (
-    <article className="rounded-3xl border border-white/8 bg-gradient-to-br from-white/6 to-white/[0.02] p-4">
+    <article className="glass-surface rounded-3xl p-4 transition-transform duration-300 hover:scale-[1.02]">
       <div className="flex flex-col gap-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -312,7 +403,7 @@ function PredictionGameCard({
             </div>
           </div>
 
-          <div className="rounded-2xl border border-white/8 bg-black/20 px-4 py-3 text-sm text-slate-300">
+          <div className="rounded-2xl border border-white/8 bg-bolao-surfaceElevated/70 px-4 py-3 text-sm text-slate-300">
             <div className="flex items-center gap-2">
               <CalendarDays className="h-4 w-4 text-emerald-300" />
               <span>{formatKickoff(game.kickoff)}</span>
@@ -322,14 +413,18 @@ function PredictionGameCard({
         </div>
 
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_18rem]">
-          <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
+          <div className="rounded-2xl border border-white/8 bg-bolao-surfaceElevated/70 p-4">
             <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
               <div className="space-y-2 text-center">
                 <p className="text-xs uppercase tracking-[0.16em] text-slate-400">
                   {game.homeTeam?.shortName ?? "Time A"}
                 </p>
-                <div className="flex justify-center text-2xl">
-                  {game.homeTeam ? getFlagEmoji(game.homeTeam.code) : "🏳️"}
+                <div className="flex justify-center">
+                  <CountryFlag
+                    code={game.homeTeam?.code}
+                    name={game.homeTeam?.name ?? "Time A"}
+                    sizeClassName="h-10 w-10"
+                  />
                 </div>
                 <input
                   type="number"
@@ -351,8 +446,12 @@ function PredictionGameCard({
                 <p className="text-xs uppercase tracking-[0.16em] text-slate-400">
                   {game.awayTeam?.shortName ?? "Time B"}
                 </p>
-                <div className="flex justify-center text-2xl">
-                  {game.awayTeam ? getFlagEmoji(game.awayTeam.code) : "🏳️"}
+                <div className="flex justify-center">
+                  <CountryFlag
+                    code={game.awayTeam?.code}
+                    name={game.awayTeam?.name ?? "Time B"}
+                    sizeClassName="h-10 w-10"
+                  />
                 </div>
                 <input
                   type="number"
@@ -370,7 +469,7 @@ function PredictionGameCard({
             </div>
           </div>
 
-          <div className="rounded-2xl border border-white/8 bg-black/20 p-4 text-sm text-slate-300">
+          <div className="rounded-2xl border border-white/8 bg-bolao-surfaceElevated/70 p-4 text-sm text-slate-300">
             <p className="font-semibold text-white">Status do palpite</p>
             <div className="mt-3 flex items-start gap-2">
               {availability.status === "open" ? (
@@ -404,7 +503,11 @@ function PredictionGameCard({
             </p>
             <p className="mt-2">
               Retorno:{" "}
-              <span className="font-semibold text-white">
+              <span
+                className={`font-semibold ${
+                  reward.amount > 0 ? "text-emerald-300" : "text-bolao-zero"
+                }`}
+              >
                 {formatCurrency(reward.amount)}
               </span>
             </p>
@@ -433,11 +536,11 @@ function DashboardAccordion({
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-3xl border border-white/8 bg-black/20">
+    <div className="glass-surface rounded-3xl transition-transform duration-300 hover:scale-[1.01]">
       <button
         type="button"
         onClick={onToggle}
-        className="flex w-full items-center justify-between gap-3 p-4 text-left transition hover:bg-white/[0.03] md:p-5"
+        className="flex w-full items-center justify-between gap-3 p-4 text-left transition hover:bg-white/[0.03] active:scale-[0.99] md:p-5"
       >
         <div className="min-w-0">
           <div className="flex items-center gap-3">
@@ -468,20 +571,69 @@ function DashboardAccordion({
         </div>
       </button>
 
-      <div
-        className={`overflow-hidden transition-all duration-300 ${
-          isOpen ? "max-h-[5000px] opacity-100" : "max-h-0 opacity-0"
-        }`}
-      >
-        <div className="border-t border-white/8 px-4 pb-4 pt-1 md:px-5 md:pb-5">
-          <div className="space-y-4 pt-4">{children}</div>
-        </div>
-      </div>
+      <AnimatePresence initial={false}>
+        {isOpen && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.3, ease: "easeOut" }}
+            className="overflow-hidden"
+          >
+            <div className="border-t border-white/8 px-4 pb-4 pt-1 md:px-5 md:pb-5">
+              <div className="space-y-4 pt-4">{children}</div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
 
-export function BolaoApp() {
+export function BolaoApp({
+  initialRemoteUserNames = [],
+}: {
+  initialRemoteUserNames?: string[];
+}) {
+  const [participantList, setParticipantList] = useState<Participant[]>(() => {
+    const baseParticipants = mergeParticipants(participants, initialRemoteUserNames);
+
+    if (typeof window === "undefined") {
+      return baseParticipants;
+    }
+
+    try {
+      const rawParticipants = window.localStorage.getItem(
+        LOCAL_STORAGE_PARTICIPANTS_KEY,
+      );
+
+      if (!rawParticipants) {
+        return baseParticipants;
+      }
+
+      const parsedParticipants = JSON.parse(rawParticipants) as Participant[];
+
+      if (!Array.isArray(parsedParticipants) || !parsedParticipants.length) {
+        return baseParticipants;
+      }
+
+      return parsedParticipants.reduce<Participant[]>((accumulator, participant) => {
+        if (
+          participant &&
+          typeof participant.id === "string" &&
+          typeof participant.name === "string" &&
+          typeof participant.accentColor === "string" &&
+          !accumulator.some((existing) => existing.id === participant.id)
+        ) {
+          accumulator.push(participant);
+        }
+
+        return accumulator;
+      }, [...baseParticipants]);
+    } catch {
+      return baseParticipants;
+    }
+  });
   const [state, setState] = useState<AppState>(initialState);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabKey>("acesso");
@@ -491,10 +643,15 @@ export function BolaoApp() {
   const [openAdminSection, setOpenAdminSection] = useState<string | null>(
     "admin-group-A",
   );
+  const [isCreateParticipantOpen, setIsCreateParticipantOpen] = useState(false);
+  const [newParticipantName, setNewParticipantName] = useState("");
+  const [participantFormError, setParticipantFormError] = useState("");
+  const [participantFormSuccess, setParticipantFormSuccess] = useState("");
+  const [isSavingParticipant, startSavingParticipant] = useTransition();
 
   const now = new Date();
   const selectedParticipant =
-    participants.find((participant) => participant.id === selectedUserId) ?? null;
+    participantList.find((participant) => participant.id === selectedUserId) ?? null;
 
   const standingsByGroup = useMemo(
     () => calculateAllStandings(groupsData, gamesData, state.results, teamsById),
@@ -530,8 +687,8 @@ export function BolaoApp() {
   );
 
   const ranking = useMemo(
-    () => buildRanking(participants, allResolvedGames, state),
-    [allResolvedGames, state],
+    () => buildRanking(participantList, allResolvedGames, state),
+    [allResolvedGames, participantList, state],
   );
 
   const predictionsCount = state.predictions.filter(
@@ -546,6 +703,17 @@ export function BolaoApp() {
   );
   const championWinners = ranking.filter((entry) => entry.championHit);
   const topScorerWinners = ranking.filter((entry) => entry.topScorerHit);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        LOCAL_STORAGE_PARTICIPANTS_KEY,
+        JSON.stringify(participantList),
+      );
+    } catch {
+      // Ignora indisponibilidade do storage para manter a tela funcional.
+    }
+  }, [participantList]);
 
   const groupGamesMap = useMemo(
     () =>
@@ -730,16 +898,88 @@ export function BolaoApp() {
     });
   }
 
+  function openCreateParticipantCard() {
+    setParticipantFormError("");
+    setParticipantFormSuccess("");
+    setNewParticipantName("");
+    setIsCreateParticipantOpen(true);
+  }
+
+  function closeCreateParticipantCard() {
+    setIsCreateParticipantOpen(false);
+    setParticipantFormError("");
+    setParticipantFormSuccess("");
+    setNewParticipantName("");
+  }
+
+  function handleCreateParticipant() {
+    const normalizedName = normalizeParticipantName(newParticipantName);
+
+    if (!normalizedName) {
+      setParticipantFormError("Informe o nome do participante.");
+      return;
+    }
+
+    const duplicatedParticipant = participantList.some(
+      (participant) =>
+        participant.name.localeCompare(normalizedName, "pt-BR", {
+          sensitivity: "accent",
+        }) === 0,
+    );
+
+    if (duplicatedParticipant) {
+      setParticipantFormError("Esse participante ja esta cadastrado.");
+      return;
+    }
+
+    const nextParticipant: Participant = {
+      id: createParticipantId(normalizedName, participantList),
+      name: normalizedName,
+      accentColor:
+        participantAccentPalette[participantList.length % participantAccentPalette.length],
+    };
+
+    setParticipantList((currentParticipants) => [...currentParticipants, nextParticipant]);
+    setSelectedUserId(nextParticipant.id);
+    setParticipantFormError("");
+    setParticipantFormSuccess(`${normalizedName} foi adicionado ao bolao.`);
+    setNewParticipantName("");
+
+    startSavingParticipant(async () => {
+      try {
+        await seedUsersIfMissingAction([normalizedName]);
+      } catch {
+        // Mantem o cadastro local ativo mesmo se a persistencia remota falhar.
+      }
+    });
+
+    setTimeout(() => {
+      setIsCreateParticipantOpen(false);
+      setParticipantFormSuccess("");
+      setActiveTab("palpites");
+    }, 500);
+  }
+
   function resetDemoData() {
     setState(initialState);
+    setParticipantList(mergeParticipants(participants, initialRemoteUserNames));
     setSelectedUserId(null);
     setActiveTab("acesso");
+    setIsCreateParticipantOpen(false);
+    setParticipantFormError("");
+    setParticipantFormSuccess("");
+    setNewParticipantName("");
+    try {
+      window.localStorage.removeItem(LOCAL_STORAGE_PARTICIPANTS_KEY);
+    } catch {
+      // Mantem o reset funcional mesmo sem acesso ao storage.
+    }
   }
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_top,#11352b_0%,#071019_38%,#030712_100%)] text-slate-100">
+    <main className="min-h-screen bg-bolao-bg text-slate-100">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 md:px-6 md:py-8">
-        <header className="overflow-hidden rounded-[2rem] border border-emerald-400/20 bg-black/30 p-5 shadow-[0_20px_80px_rgba(16,185,129,0.12)] backdrop-blur md:p-8">
+        <header className="glass-surface overflow-hidden rounded-[2rem] p-5 md:p-8">
           <div className="grid gap-6 lg:grid-cols-[1.3fr_0.9fr]">
             <div>
               <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.28em] text-emerald-200">
@@ -754,7 +994,7 @@ export function BolaoApp() {
                 automatica, 8 melhores terceiros colocados, chaveamento do
                 mata-mata e bloqueio de palpites por janela de 48 horas.
               </p>
-              <div className="mt-5 rounded-2xl border border-white/8 bg-black/20 px-4 py-3 text-sm text-slate-300">
+              <div className="rounded-2xl border border-white/8 bg-bolao-surfaceElevated/70 px-4 py-3 text-sm text-slate-300">
                 Agora: <span className="font-semibold text-white">{formatFullDateTime(now.toISOString())}</span>
               </div>
             </div>
@@ -762,7 +1002,7 @@ export function BolaoApp() {
             <div className="grid gap-3 sm:grid-cols-2">
               <StatCard
                 label="Participantes"
-                value={String(participants.length)}
+                value={String(participantList.length)}
                 helper="Grupo fechado para o bolao"
               />
               <StatCard
@@ -784,7 +1024,7 @@ export function BolaoApp() {
           </div>
         </header>
 
-        <section className="rounded-3xl border border-white/10 bg-black/25 p-3 shadow-[0_20px_60px_rgba(0,0,0,0.2)] backdrop-blur">
+        <section className="glass-surface rounded-3xl p-3">
           <div className="grid gap-2 md:grid-cols-4">
             {tabs.map((tab) => {
               const isActive = tab.key === activeTab;
@@ -794,10 +1034,10 @@ export function BolaoApp() {
                   key={tab.key}
                   type="button"
                   onClick={() => setActiveTab(tab.key)}
-                  className={`rounded-2xl border px-4 py-3 text-left transition ${
+                  className={`rounded-2xl border px-4 py-3 text-left transition active:scale-95 ${
                     isActive
-                      ? "border-emerald-300/40 bg-emerald-400/12 text-white"
-                      : "border-white/8 bg-white/[0.03] text-slate-300 hover:border-white/20 hover:bg-white/[0.06]"
+                      ? "border-emerald-300/40 bg-emerald-400/12 text-white shadow-[0_12px_30px_rgba(16,185,129,0.12)]"
+                      : "border-white/8 bg-white/[0.03] text-slate-300 hover:scale-[1.02] hover:border-white/20 hover:bg-white/[0.06]"
                   }`}
                 >
                   <div className="flex items-center gap-2 text-sm font-semibold">
@@ -818,7 +1058,9 @@ export function BolaoApp() {
           </div>
         </section>
 
+        <AnimatePresence mode="wait">
         {activeTab === "acesso" && (
+          <motion.div key="tab-acesso" {...tabTransition}>
           <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
             <SectionCard
               title="Acesso"
@@ -826,7 +1068,7 @@ export function BolaoApp() {
               icon={<UserCircle2 className="h-6 w-6" />}
             >
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {participants.map((participant) => {
+                {participantList.map((participant) => {
                   const isActive = participant.id === selectedUserId;
 
                   return (
@@ -872,6 +1114,17 @@ export function BolaoApp() {
                   ? `Usuario ativo: ${selectedParticipant.name}. A aba de palpites respeita a janela de 48h para cada partida.`
                   : "Selecione um participante para liberar a edicao dos palpites."}
               </div>
+
+              <div className="mt-5">
+                <button
+                  type="button"
+                  onClick={openCreateParticipantCard}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-emerald-400/25 bg-emerald-400/10 px-4 py-3 font-medium text-emerald-100 transition hover:bg-emerald-400/15"
+                >
+                  <Plus className="h-4 w-4" />
+                  Adicionar participante
+                </button>
+              </div>
             </SectionCard>
 
             <SectionCard
@@ -914,9 +1167,11 @@ export function BolaoApp() {
               </div>
             </SectionCard>
           </div>
+          </motion.div>
         )}
 
         {activeTab === "palpites" && (
+          <motion.div key="tab-palpites" {...tabTransition}>
           <SectionCard
             title="Dashboard"
             subtitle="Palpites dos grupos, 16 avos e fases seguintes"
@@ -1031,9 +1286,11 @@ export function BolaoApp() {
               </div>
             </div>
           </SectionCard>
+          </motion.div>
         )}
 
         {activeTab === "ranking" && (
+          <motion.div key="tab-ranking" {...tabTransition}>
           <div className="space-y-6">
             <SectionCard
               title="Leaderboard"
@@ -1175,9 +1432,11 @@ export function BolaoApp() {
               </div>
             </SectionCard>
           </div>
+          </motion.div>
         )}
 
         {activeTab === "admin" && (
+          <motion.div key="tab-admin" {...tabTransition}>
           <div className="space-y-6">
             <SectionCard
               title="Administracao"
@@ -1427,7 +1686,106 @@ export function BolaoApp() {
               </div>
             </SectionCard>
           </div>
+          </motion.div>
         )}
+        </AnimatePresence>
+
+        <AnimatePresence>
+        {isCreateParticipantOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm"
+          >
+            <motion.div
+              initial={{ opacity: 0, y: 14, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 14, scale: 0.98 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+              className="glass-surface w-full max-w-md rounded-3xl p-5"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-sm font-semibold uppercase tracking-[0.22em] text-emerald-300/80">
+                    Novo Participante
+                  </p>
+                  <h3 className="mt-2 text-xl font-semibold text-white">
+                    Cadastro rapido para entrar no bolao
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeCreateParticipantCard}
+                  className="rounded-2xl border border-white/10 bg-white/5 p-2 text-slate-300 transition hover:bg-white/10 active:scale-95"
+                  aria-label="Fechar cadastro"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="mt-5 space-y-4">
+                <label className="block">
+                  <span className="text-sm text-slate-300">Nome do participante</span>
+                  <input
+                    type="text"
+                    autoFocus
+                    value={newParticipantName}
+                    onChange={(event) => {
+                      setNewParticipantName(event.target.value);
+                      if (participantFormError) {
+                        setParticipantFormError("");
+                      }
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        handleCreateParticipant();
+                      }
+                    }}
+                    placeholder="Ex.: Marcelo"
+                    className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none transition focus:border-emerald-400/60"
+                  />
+                </label>
+
+                <div className="rounded-2xl border border-white/8 bg-white/5 p-4 text-sm text-slate-300">
+                  Ao salvar, o novo participante entra imediatamente no acesso, no
+                  ranking e no fluxo completo de palpites.
+                </div>
+
+                {participantFormError && (
+                  <div className="rounded-2xl border border-rose-400/20 bg-rose-400/10 p-3 text-sm text-rose-100">
+                    {participantFormError}
+                  </div>
+                )}
+
+                {participantFormSuccess && (
+                  <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-3 text-sm text-emerald-100">
+                    {participantFormSuccess}
+                  </div>
+                )}
+
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={closeCreateParticipantCard}
+                  className="flex-1 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 font-medium text-white transition hover:bg-white/10 active:scale-95"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCreateParticipant}
+                    disabled={isSavingParticipant}
+                    className="flex-1 rounded-2xl border border-emerald-400/20 bg-emerald-400/15 px-4 py-3 font-medium text-emerald-100 transition hover:bg-emerald-400/20 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isSavingParticipant ? "Salvando..." : "Salvar participante"}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+        </AnimatePresence>
       </div>
     </main>
   );
