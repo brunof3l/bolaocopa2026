@@ -1,0 +1,174 @@
+export type MatchOutcome = "home" | "away" | "draw";
+
+export type GroupId =
+  | "A"
+  | "B"
+  | "C"
+  | "D"
+  | "E"
+  | "F"
+  | "G"
+  | "H"
+  | "I"
+  | "J"
+  | "K"
+  | "L";
+
+export type TournamentStage =
+  | "group"
+  | "round_of_32"
+  | "round_of_16"
+  | "quarterfinal"
+  | "semifinal"
+  | "third_place"
+  | "final";
+
+export type Team = {
+  id: string;
+  code: string;
+  name: string;
+  shortName: string;
+  groupId?: GroupId;
+  isPlaceholder?: boolean;
+};
+
+export type GroupDefinition = {
+  id: GroupId;
+  name: string;
+  teams: Team[];
+};
+
+export type Participant = {
+  id: string;
+  name: string;
+  accentColor: string;
+};
+
+export type TeamSlotSource =
+  | {
+      type: "group_position";
+      groupId: GroupId;
+      position: 1 | 2;
+    }
+  | {
+      type: "best_third";
+      slotId: string;
+      candidateGroups: GroupId[];
+    }
+  | {
+      type: "winner";
+      matchId: string;
+    }
+  | {
+      type: "loser";
+      matchId: string;
+    };
+
+export type Game = {
+  id: string;
+  matchNumber: number;
+  stage: TournamentStage;
+  roundLabel: string;
+  matchdayLabel: string;
+  kickoff: string;
+  stadium: string;
+  groupId?: GroupId;
+  homeTeamId: string | null;
+  awayTeamId: string | null;
+  homeSource?: TeamSlotSource;
+  awaySource?: TeamSlotSource;
+};
+
+export type ResolvedGame = Game & {
+  homeTeam: Team | null;
+  awayTeam: Team | null;
+};
+
+export type Prediction = {
+  userId: string;
+  gameId: string;
+  homeScore: number | null;
+  awayScore: number | null;
+  updatedAt: string;
+};
+
+export type SpecialPick = {
+  userId: string;
+  champion: string;
+  topScorer: string;
+};
+
+export type MatchResult = {
+  gameId: string;
+  homeScore: number | null;
+  awayScore: number | null;
+  finished: boolean;
+};
+
+export type OfficialAwards = {
+  champion: string | null;
+  topScorer: string | null;
+};
+
+export type AppState = {
+  predictions: Prediction[];
+  specialPicks: SpecialPick[];
+  results: MatchResult[];
+  awards: OfficialAwards;
+};
+
+export type RankingEntry = {
+  userId: string;
+  name: string;
+  balance: number;
+  exactHits: number;
+  resultHits: number;
+  championHit: boolean;
+  topScorerHit: boolean;
+  paidAwardsTotal: number;
+};
+
+export type StandingEntry = {
+  groupId: GroupId;
+  position: number;
+  teamId: string;
+  team: Team;
+  points: number;
+  played: number;
+  wins: number;
+  draws: number;
+  losses: number;
+  goalsFor: number;
+  goalsAgainst: number;
+  goalDifference: number;
+};
+
+export type BestThirdEntry = StandingEntry & {
+  thirdPlaceRank: number;
+};
+
+export type KnockoutSlotAssignment = Record<string, GroupId>;
+
+export type PredictionAvailability =
+  | {
+      status: "open";
+      message: string;
+    }
+  | {
+      status: "pending";
+      message: string;
+    }
+  | {
+      status: "locked";
+      message: string;
+    };
+
+export type PredictionReward = {
+  amount: number;
+  resultHit: boolean;
+  goalsHit: boolean;
+  exactHit: boolean;
+  resultReward: number;
+  goalsReward: number;
+  exactScoreReward: number;
+};
