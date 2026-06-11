@@ -42,6 +42,7 @@ import {
   getPrediction,
   getPredictionAvailability,
   getPredictionReward,
+  getSpecialPickAvailability,
   getSpecialPick,
   groupGamesByStage,
   scoringRules,
@@ -50,12 +51,15 @@ import {
 } from "@/lib/bolao";
 import {
   calculateAllStandings,
+  calculateTournamentFinance,
   generateKnockoutBracket,
   rankThirdPlacedTeams,
+  TOURNAMENT_INVESTMENT_TOTAL,
 } from "@/lib/tournamentEngine";
 import type {
   AppState,
   GroupId,
+  MatchPoolBreakdown,
   MatchResult,
   Participant,
   Prediction,
@@ -103,7 +107,7 @@ const tabs: Array<{
   {
     key: "palpites",
     label: "Palpites",
-    description: "Janela de 48h e edicao",
+    description: "Potes e trava de 1 min",
     icon: <Swords className="h-4 w-4" />,
   },
   {
@@ -364,6 +368,7 @@ function PredictionGameCard({
   selectedParticipant,
   predictions,
   results,
+  breakdown,
   now,
   onPredictionChange,
 }: {
@@ -372,6 +377,7 @@ function PredictionGameCard({
   selectedParticipant: { id: string; name: string } | null;
   predictions: AppState["predictions"];
   results: AppState["results"];
+  breakdown?: MatchPoolBreakdown;
   now: Date;
   onPredictionChange: (
     gameId: string,
@@ -383,9 +389,12 @@ function PredictionGameCard({
     ? getPrediction(predictions, selectedUserId, game.id)
     : undefined;
   const result = results.find((item) => item.gameId === game.id);
-  const reward = getPredictionReward(prediction, result);
+  const reward = getPredictionReward(prediction, result, breakdown);
   const availability = getPredictionAvailability(game, now);
   const isEditable = Boolean(selectedParticipant) && availability.status === "open";
+  const totalGamePot = breakdown
+    ? breakdown.totalPot.result + breakdown.totalPot.goals + breakdown.totalPot.exact
+    : 0;
 
   return (
     <article className="glass-surface rounded-3xl p-4 transition-transform duration-300 hover:scale-[1.02]">
@@ -502,7 +511,7 @@ function PredictionGameCard({
               </span>
             </p>
             <p className="mt-2">
-              Retorno:{" "}
+              Ganho neste jogo:{" "}
               <span
                 className={`font-semibold ${
                   reward.amount > 0 ? "text-emerald-300" : "text-bolao-zero"
@@ -510,6 +519,9 @@ function PredictionGameCard({
               >
                 {formatCurrency(reward.amount)}
               </span>
+            </p>
+            <p className="mt-2 text-xs text-slate-400">
+              Pote atual: {formatCurrency(totalGamePot)}
             </p>
           </div>
         </div>
@@ -690,6 +702,10 @@ export function BolaoApp({
     () => buildRanking(participantList, allResolvedGames, state),
     [allResolvedGames, participantList, state],
   );
+  const financeSummary = useMemo(
+    () => calculateTournamentFinance(participantList, allResolvedGames, state),
+    [allResolvedGames, participantList, state],
+  );
 
   const predictionsCount = state.predictions.filter(
     (prediction) =>
@@ -703,6 +719,15 @@ export function BolaoApp({
   );
   const championWinners = ranking.filter((entry) => entry.championHit);
   const topScorerWinners = ranking.filter((entry) => entry.topScorerHit);
+  const firstTournamentKickoff = gamesData
+    .slice()
+    .sort(
+      (left, right) =>
+        new Date(left.kickoff).getTime() - new Date(right.kickoff).getTime(),
+    )[0]?.kickoff;
+  const specialPickAvailability = firstTournamentKickoff
+    ? getSpecialPickAvailability(firstTournamentKickoff, now)
+    : { status: "locked" as const, message: "Calendario indisponivel" };
 
   useEffect(() => {
     try {
@@ -824,7 +849,7 @@ export function BolaoApp({
   }
 
   function handleSpecialPickChange(field: "champion" | "topScorer", value: string) {
-    if (!selectedUserId) {
+    if (!selectedUserId || specialPickAvailability.status !== "open") {
       return;
     }
 
@@ -987,12 +1012,13 @@ export function BolaoApp({
                 Bolao Copa 2026
               </div>
               <h1 className="max-w-3xl text-3xl font-semibold leading-tight text-white md:text-5xl">
-                Motor completo de grupos, 16 avos e painel admin em tempo real.
+                Bolao da Copa com potes compartilhados, rollover e acerto final.
               </h1>
               <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-300 md:text-base">
                 O sistema agora considera 48 selecoes, 12 grupos, classificacao
                 automatica, 8 melhores terceiros colocados, chaveamento do
-                mata-mata e bloqueio de palpites por janela de 48 horas.
+                mata-mata, potes pari-mutuel por criterio e trava de palpites ate
+                1 minuto antes do jogo.
               </p>
               <div className="rounded-2xl border border-white/8 bg-bolao-surfaceElevated/70 px-4 py-3 text-sm text-slate-300">
                 Agora: <span className="font-semibold text-white">{formatFullDateTime(now.toISOString())}</span>
@@ -1111,7 +1137,7 @@ export function BolaoApp({
 
               <div className="mt-5 rounded-2xl border border-white/8 bg-black/20 p-4 text-sm text-slate-300">
                 {selectedParticipant
-                  ? `Usuario ativo: ${selectedParticipant.name}. A aba de palpites respeita a janela de 48h para cada partida.`
+                  ? `Usuario ativo: ${selectedParticipant.name}. Os palpites ficam abertos ate 1 minuto antes de cada partida.`
                   : "Selecione um participante para liberar a edicao dos palpites."}
               </div>
 
@@ -1129,7 +1155,7 @@ export function BolaoApp({
 
             <SectionCard
               title="Regras"
-              subtitle="Pontuacao e janela de liberacao dos palpites"
+              subtitle="Potes compartilhados, premios finais e janela de edicao"
               icon={<ShieldCheck className="h-6 w-6" />}
             >
               <div className="grid gap-3">
@@ -1147,9 +1173,19 @@ export function BolaoApp({
               </div>
 
               <div className="mt-4 rounded-2xl border border-amber-300/15 bg-amber-300/5 p-4 text-sm text-amber-100/90">
-                O palpite so abre exatamente 48 horas antes do jogo. Antes disso o
-                card mostra &quot;Abre em...&quot;. Depois do inicio da partida, a edicao fica
-                bloqueada permanentemente.
+                Cada jogo forma 3 potes: resultado, gols e placar exato. Se
+                ninguem acertar um criterio, o valor acumula para o proximo jogo.
+                Os palpites podem ser editados ate 1 minuto antes do apito
+                inicial.
+              </div>
+
+              <div className="mt-4 rounded-2xl border border-emerald-400/15 bg-emerald-400/5 p-4 text-sm text-emerald-100/90">
+                Investimento total por participante:{" "}
+                <span className="font-semibold text-white">
+                  {formatCurrency(TOURNAMENT_INVESTMENT_TOTAL)}
+                </span>
+                . O encontro de contas acontece no fim com a formula ganhos menos
+                investimento total.
               </div>
 
               <div className="mt-4 grid gap-3">
@@ -1160,7 +1196,8 @@ export function BolaoApp({
                   >
                     <p className="text-sm font-medium text-white">{award.label}</p>
                     <p className="mt-1 text-xs text-slate-400">
-                      Premio atual: {formatCurrency(award.prize)}
+                      Pote final atual:{" "}
+                      {formatCurrency(participantList.length * award.prize)}
                     </p>
                   </div>
                 ))}
@@ -1184,7 +1221,7 @@ export function BolaoApp({
                 </span>
                 <span>
                   {selectedParticipant
-                    ? "Os cards abrem apenas dentro da janela de 48 horas."
+                    ? "Os palpites ficam abertos ate 1 minuto antes de cada jogo."
                     : "Escolha um participante na aba de acesso para liberar a edicao."}
                 </span>
               </div>
@@ -1209,6 +1246,7 @@ export function BolaoApp({
                       selectedParticipant={selectedParticipant}
                       predictions={state.predictions}
                       results={state.results}
+                      breakdown={financeSummary.matchBreakdowns[game.id]}
                       now={now}
                       onPredictionChange={handlePredictionChange}
                     />
@@ -1234,6 +1272,7 @@ export function BolaoApp({
                       selectedParticipant={selectedParticipant}
                       predictions={state.predictions}
                       results={state.results}
+                      breakdown={financeSummary.matchBreakdowns[game.id]}
                       now={now}
                       onPredictionChange={handlePredictionChange}
                     />
@@ -1249,7 +1288,9 @@ export function BolaoApp({
                   </div>
                   <input
                     type="text"
-                    disabled={!selectedParticipant}
+                    disabled={
+                      !selectedParticipant || specialPickAvailability.status !== "open"
+                    }
                     value={
                       selectedUserId
                         ? getSpecialPick(state.specialPicks, selectedUserId)?.champion ?? ""
@@ -1261,6 +1302,9 @@ export function BolaoApp({
                     placeholder="Ex.: Brasil"
                     className="mt-4 w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-white outline-none transition focus:border-amber-300/60 disabled:cursor-not-allowed disabled:opacity-50"
                   />
+                  <p className="mt-3 text-xs text-slate-400">
+                    {specialPickAvailability.message}
+                  </p>
                 </div>
 
                 <div className="rounded-3xl border border-white/8 bg-black/20 p-4">
@@ -1270,7 +1314,9 @@ export function BolaoApp({
                   </div>
                   <input
                     type="text"
-                    disabled={!selectedParticipant}
+                    disabled={
+                      !selectedParticipant || specialPickAvailability.status !== "open"
+                    }
                     value={
                       selectedUserId
                         ? getSpecialPick(state.specialPicks, selectedUserId)?.topScorer ?? ""
@@ -1282,6 +1328,9 @@ export function BolaoApp({
                     placeholder="Ex.: Mbappe"
                     className="mt-4 w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-white outline-none transition focus:border-sky-300/60 disabled:cursor-not-allowed disabled:opacity-50"
                   />
+                  <p className="mt-3 text-xs text-slate-400">
+                    {specialPickAvailability.message}
+                  </p>
                 </div>
               </div>
             </div>
@@ -1294,7 +1343,7 @@ export function BolaoApp({
           <div className="space-y-6">
             <SectionCard
               title="Leaderboard"
-              subtitle="Saldo acumulado, premios e desempenhos do bolao"
+              subtitle="Ganhos acumulados, premios finais e acerto de contas"
               icon={<Medal className="h-6 w-6" />}
             >
               <div className="grid gap-4 lg:grid-cols-3">
@@ -1305,7 +1354,9 @@ export function BolaoApp({
                       ? exactLeaders.map((entry) => entry.name).join(", ")
                       : "Sem lider ainda"}
                   </p>
-                  <p className="mt-1 text-xs text-slate-400">Premio de R$ 20,00</p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    Pote final: {formatCurrency(financeSummary.finalAwards.exactHitsPot)}
+                  </p>
                 </div>
                 <div className="rounded-3xl border border-emerald-300/15 bg-emerald-300/5 p-4">
                   <p className="text-sm text-emerald-100/80">Acertou o campeao</p>
@@ -1314,7 +1365,9 @@ export function BolaoApp({
                       ? championWinners.map((entry) => entry.name).join(", ")
                       : "Aguardando definicao oficial"}
                   </p>
-                  <p className="mt-1 text-xs text-slate-400">Premio de R$ 30,00</p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    Pote final: {formatCurrency(financeSummary.finalAwards.championPot)}
+                  </p>
                 </div>
                 <div className="rounded-3xl border border-sky-300/15 bg-sky-300/5 p-4">
                   <p className="text-sm text-sky-100/80">Acertou o artilheiro</p>
@@ -1323,7 +1376,9 @@ export function BolaoApp({
                       ? topScorerWinners.map((entry) => entry.name).join(", ")
                       : "Aguardando definicao oficial"}
                   </p>
-                  <p className="mt-1 text-xs text-slate-400">Premio de R$ 5,00</p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    Pote final: {formatCurrency(financeSummary.finalAwards.topScorerPot)}
+                  </p>
                 </div>
               </div>
 
@@ -1333,12 +1388,14 @@ export function BolaoApp({
                     <tr>
                       <th className="px-4 py-3 font-medium">Pos.</th>
                       <th className="px-4 py-3 font-medium">Participante</th>
-                      <th className="px-4 py-3 font-medium">Saldo</th>
+                      <th className="px-4 py-3 font-medium">Ganhos</th>
+                      <th className="px-4 py-3 font-medium">Acerto de Contas (Liquido)</th>
+                      <th className="px-4 py-3 font-medium">Ganhos por Jogos</th>
+                      <th className="px-4 py-3 font-medium">Premios Finais</th>
                       <th className="px-4 py-3 font-medium">Cravos</th>
                       <th className="px-4 py-3 font-medium">Resultados certos</th>
                       <th className="px-4 py-3 font-medium">Campeao</th>
                       <th className="px-4 py-3 font-medium">Artilheiro</th>
-                      <th className="px-4 py-3 font-medium">Premios</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1349,14 +1406,31 @@ export function BolaoApp({
                       >
                         <td className="px-4 py-3">{index + 1}</td>
                         <td className="px-4 py-3 font-medium text-white">{entry.name}</td>
-                        <td className="px-4 py-3">{formatCurrency(entry.balance)}</td>
+                        <td className="px-4 py-3 font-semibold text-white">
+                          {formatCurrency(entry.grossWinnings)}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span
+                            className={`font-semibold ${
+                              entry.netSettlement > 0
+                                ? "text-emerald-300"
+                                : entry.netSettlement < 0
+                                  ? "text-rose-300"
+                                  : "text-bolao-zero"
+                            }`}
+                          >
+                            {entry.netSettlement > 0 ? "+" : ""}
+                            {formatCurrency(entry.netSettlement)} · {entry.settlementLabel}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">{formatCurrency(entry.matchWinnings)}</td>
+                        <td className="px-4 py-3">
+                          {formatCurrency(entry.finalAwardsWinnings)}
+                        </td>
                         <td className="px-4 py-3">{entry.exactHits}</td>
                         <td className="px-4 py-3">{entry.resultHits}</td>
                         <td className="px-4 py-3">{entry.championHit ? "Sim" : "Nao"}</td>
                         <td className="px-4 py-3">{entry.topScorerHit ? "Sim" : "Nao"}</td>
-                        <td className="px-4 py-3">
-                          {formatCurrency(entry.paidAwardsTotal)}
-                        </td>
                       </tr>
                     ))}
                   </tbody>

@@ -4,18 +4,29 @@ import type {
   GroupDefinition,
   GroupId,
   KnockoutSlotAssignment,
+  MatchPoolBreakdown,
   MatchResult,
   Prediction,
   PredictionReward,
   ResolvedGame,
+  SharedPot,
   StandingEntry,
   Team,
   TeamSlotSource,
+  TournamentFinanceSummary,
+  AppState,
+  Participant,
+  SpecialPick,
 } from "@/types/bolao";
 
-const resultReward = 0.5;
-export const goalsReward = 1.0;
-const exactScoreReward = 1.5;
+export const sharedPotContribution = {
+  result: 0.5,
+  goals: 1.0,
+  exact: 1.5,
+} as const;
+
+export const TOURNAMENT_INVESTMENT_TOTAL = 367;
+export const goalsReward = sharedPotContribution.goals;
 
 function getMatchOutcome(homeScore: number, awayScore: number) {
   if (homeScore > awayScore) {
@@ -29,10 +40,45 @@ function getMatchOutcome(homeScore: number, awayScore: number) {
   return "draw";
 }
 
-export function calculatePredictionReward(
+function roundCurrency(value: number) {
+  return Number(value.toFixed(2));
+}
+
+export function roundDownCurrency(value: number) {
+  return Math.floor((value + Number.EPSILON) * 100) / 100;
+}
+
+function createSharedPot(
+  overrides: Partial<SharedPot> = {},
+): SharedPot {
+  return {
+    result: 0,
+    goals: 0,
+    exact: 0,
+    ...overrides,
+  };
+}
+
+function addSharedPots(left: SharedPot, right: SharedPot): SharedPot {
+  return createSharedPot({
+    result: roundCurrency(left.result + right.result),
+    goals: roundCurrency(left.goals + right.goals),
+    exact: roundCurrency(left.exact + right.exact),
+  });
+}
+
+function multiplySharedPot(multiplier: number): SharedPot {
+  return createSharedPot({
+    result: roundCurrency(multiplier * sharedPotContribution.result),
+    goals: roundCurrency(multiplier * sharedPotContribution.goals),
+    exact: roundCurrency(multiplier * sharedPotContribution.exact),
+  });
+}
+
+export function getPredictionHits(
   prediction: Prediction | undefined,
   result: MatchResult | undefined,
-): PredictionReward {
+) {
   if (
     !prediction ||
     !result?.finished ||
@@ -42,13 +88,9 @@ export function calculatePredictionReward(
     prediction.awayScore === null
   ) {
     return {
-      amount: 0,
       resultHit: false,
       goalsHit: false,
       exactHit: false,
-      resultReward,
-      goalsReward,
-      exactScoreReward,
     };
   }
 
@@ -60,23 +102,406 @@ export function calculatePredictionReward(
     getMatchOutcome(result.homeScore, result.awayScore);
   const goalsHit =
     resultHit &&
-    !exactHit &&
     (prediction.homeScore === result.homeScore ||
       prediction.awayScore === result.awayScore);
 
-  const amount =
-    (resultHit ? resultReward : 0) +
-    ((goalsHit || exactHit) ? goalsReward : 0) +
-    (exactHit ? exactScoreReward : 0);
+  return {
+    resultHit,
+    goalsHit,
+    exactHit,
+  };
+}
+
+export function calculatePredictionReward(
+  prediction: Prediction | undefined,
+  result: MatchResult | undefined,
+  breakdown?: MatchPoolBreakdown,
+): PredictionReward {
+  const { resultHit, goalsHit, exactHit } = getPredictionHits(prediction, result);
+  const resultAmount =
+    prediction && resultHit && breakdown
+      ? breakdown.payoutPerWinner.result
+      : 0;
+  const goalsAmount =
+    prediction && goalsHit && breakdown
+      ? breakdown.payoutPerWinner.goals
+      : 0;
+  const exactAmount =
+    prediction && exactHit && breakdown
+      ? breakdown.payoutPerWinner.exact
+      : 0;
 
   return {
-    amount,
+    amount: roundCurrency(resultAmount + goalsAmount + exactAmount),
     resultHit,
-    goalsHit: goalsHit || exactHit,
+    goalsHit,
     exactHit,
-    resultReward,
-    goalsReward,
-    exactScoreReward,
+    resultAmount,
+    goalsAmount,
+    exactAmount,
+  };
+}
+
+function getResultMap(results: MatchResult[]) {
+  return new Map(results.map((result) => [result.gameId, result] as const));
+}
+
+function normalizeText(value: string | null | undefined) {
+  return (value ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildTeamLookup(games: Array<Game | ResolvedGame>) {
+  const lookup = new Map<string, string>();
+
+  for (const game of games) {
+    const candidates =
+      "homeTeam" in game
+        ? [game.homeTeam, game.awayTeam]
+        : [];
+
+    for (const team of candidates) {
+      if (!team) {
+        continue;
+      }
+
+      lookup.set(normalizeText(team.id), team.id);
+      lookup.set(normalizeText(team.name), team.id);
+      lookup.set(normalizeText(team.shortName), team.id);
+    }
+  }
+
+  return lookup;
+}
+
+function getTeamProgressScores(games: Array<Game | ResolvedGame>, results: MatchResult[]) {
+  const stageScoreMap: Record<string, number> = {
+    group: 1,
+    round_of_32: 2,
+    round_of_16: 3,
+    quarterfinal: 4,
+    semifinal: 5,
+    third_place: 5,
+    final: 6,
+  };
+  const progress = new Map<string, number>();
+  const resultMap = getResultMap(results);
+
+  for (const game of games) {
+    const homeTeamId = "homeTeam" in game ? game.homeTeam?.id ?? null : game.homeTeamId;
+    const awayTeamId = "awayTeam" in game ? game.awayTeam?.id ?? null : game.awayTeamId;
+    const stageScore = stageScoreMap[game.stage] ?? 0;
+
+    if (homeTeamId) {
+      progress.set(homeTeamId, Math.max(progress.get(homeTeamId) ?? 0, stageScore));
+    }
+
+    if (awayTeamId) {
+      progress.set(awayTeamId, Math.max(progress.get(awayTeamId) ?? 0, stageScore));
+    }
+
+    const result = resultMap.get(game.id);
+
+    if (
+      game.stage === "final" &&
+      result?.finished &&
+      result.homeScore !== null &&
+      result.awayScore !== null
+    ) {
+      const championTeamId =
+        result.homeScore > result.awayScore ? homeTeamId : awayTeamId;
+
+      if (championTeamId) {
+        progress.set(championTeamId, 7);
+      }
+    }
+  }
+
+  return progress;
+}
+
+function getFinalAwardWinners(
+  participants: Participant[],
+  specialPicks: SpecialPick[],
+  officialChampion: string | null,
+  officialTopScorer: string | null,
+  games: Array<Game | ResolvedGame>,
+  results: MatchResult[],
+  exactHitsByUser: Record<string, number>,
+) {
+  const participantCount = participants.length;
+  const teamProgress = getTeamProgressScores(games, results);
+  const teamLookup = buildTeamLookup(games);
+  const picksByUser = new Map(specialPicks.map((pick) => [pick.userId, pick] as const));
+  const exactHitsPot = roundCurrency(participantCount * 20);
+  const championPot = roundCurrency(participantCount * 30);
+  const topScorerPot = roundCurrency(participantCount * 5);
+  const officialChampionNormalized = normalizeText(officialChampion);
+  const officialTopScorerNormalized = normalizeText(officialTopScorer);
+
+  const exactHitLeaders = participants
+    .map((participant) => ({
+      userId: participant.id,
+      exactHits: exactHitsByUser[participant.id] ?? 0,
+    }))
+    .sort((left, right) => right.exactHits - left.exactHits);
+  const maxExactHits = exactHitLeaders[0]?.exactHits ?? 0;
+  const exactHitsWinners = exactHitLeaders
+    .filter((entry) => entry.exactHits === maxExactHits)
+    .map((entry) => entry.userId);
+  const exactHitsAwardPerWinner = exactHitsWinners.length
+    ? roundDownCurrency(exactHitsPot / exactHitsWinners.length)
+    : 0;
+
+  let championWinners: string[] = [];
+
+  if (officialChampion) {
+    championWinners = participants
+      .filter(
+        (participant) =>
+          normalizeText(picksByUser.get(participant.id)?.champion) ===
+          officialChampionNormalized,
+      )
+      .map((participant) => participant.id);
+
+    if (!championWinners.length) {
+      const farthest = participants.map((participant) => {
+        const selectedChampion = picksByUser.get(participant.id)?.champion ?? "";
+        const selectedChampionId =
+          teamLookup.get(normalizeText(selectedChampion)) ?? normalizeText(selectedChampion);
+        return {
+          userId: participant.id,
+          progress: teamProgress.get(selectedChampionId) ?? 0,
+        };
+      });
+      const maxProgress = Math.max(...farthest.map((entry) => entry.progress), 0);
+      championWinners = farthest
+        .filter((entry) => entry.progress === maxProgress)
+        .map((entry) => entry.userId);
+    }
+  }
+
+  const championAwardPerWinner = championWinners.length
+    ? roundDownCurrency(championPot / championWinners.length)
+    : 0;
+
+  const topScorerWinners = officialTopScorer
+    ? participants
+        .filter(
+          (participant) =>
+            normalizeText(picksByUser.get(participant.id)?.topScorer) ===
+            officialTopScorerNormalized,
+        )
+        .map((participant) => participant.id)
+    : [];
+  const topScorerAwardPerWinner = topScorerWinners.length
+    ? roundDownCurrency(topScorerPot / topScorerWinners.length)
+    : 0;
+
+  return {
+    championWinners,
+    championAwardPerWinner,
+    championPot,
+    exactHitsWinners,
+    exactHitsAwardPerWinner,
+    exactHitsPot,
+    topScorerWinners,
+    topScorerAwardPerWinner,
+    topScorerPot,
+  };
+}
+
+export function calculateTournamentFinance(
+  participants: Participant[],
+  games: Array<Game | ResolvedGame>,
+  state: AppState,
+): TournamentFinanceSummary {
+  const participantCount = participants.length;
+  const sortedGames = [...games].sort(
+    (left, right) =>
+      new Date(left.kickoff).getTime() - new Date(right.kickoff).getTime(),
+  );
+  const resultMap = getResultMap(state.results);
+  const winningsByUser = Object.fromEntries(
+    participants.map((participant) => [participant.id, 0] as const),
+  ) as Record<string, number>;
+  const exactHitsByUser = Object.fromEntries(
+    participants.map((participant) => [participant.id, 0] as const),
+  ) as Record<string, number>;
+  const resultHitsByUser = Object.fromEntries(
+    participants.map((participant) => [participant.id, 0] as const),
+  ) as Record<string, number>;
+  const matchBreakdowns: Record<string, MatchPoolBreakdown> = {};
+  let carry = createSharedPot();
+
+  for (const game of sortedGames) {
+    const result = resultMap.get(game.id);
+    const basePot = multiplySharedPot(participantCount);
+    const totalPot = addSharedPots(basePot, carry);
+    const predictions = participants
+      .map((participant) =>
+        state.predictions.find(
+          (prediction) =>
+            prediction.userId === participant.id && prediction.gameId === game.id,
+        ),
+      )
+      .filter(Boolean) as Prediction[];
+
+    const winners = {
+      result: [] as string[],
+      goals: [] as string[],
+      exact: [] as string[],
+    };
+
+    for (const prediction of predictions) {
+      const hits = getPredictionHits(prediction, result);
+
+      if (hits.resultHit) {
+        winners.result.push(prediction.userId);
+        resultHitsByUser[prediction.userId] =
+          (resultHitsByUser[prediction.userId] ?? 0) + 1;
+      }
+
+      if (hits.goalsHit) {
+        winners.goals.push(prediction.userId);
+      }
+
+      if (hits.exactHit) {
+        winners.exact.push(prediction.userId);
+        exactHitsByUser[prediction.userId] =
+          (exactHitsByUser[prediction.userId] ?? 0) + 1;
+      }
+    }
+
+    const isSettled =
+      Boolean(result?.finished) &&
+      result?.homeScore !== null &&
+      result?.awayScore !== null;
+
+    const payoutPerWinner = createSharedPot({
+      result:
+        isSettled && winners.result.length
+          ? roundDownCurrency(totalPot.result / winners.result.length)
+          : 0,
+      goals:
+        isSettled && winners.goals.length
+          ? roundDownCurrency(totalPot.goals / winners.goals.length)
+          : 0,
+      exact:
+        isSettled && winners.exact.length
+          ? roundDownCurrency(totalPot.exact / winners.exact.length)
+          : 0,
+    });
+
+    const distributed = createSharedPot({
+      result: roundCurrency(payoutPerWinner.result * winners.result.length),
+      goals: roundCurrency(payoutPerWinner.goals * winners.goals.length),
+      exact: roundCurrency(payoutPerWinner.exact * winners.exact.length),
+    });
+    const rolloverOut = isSettled
+      ? createSharedPot({
+          result:
+            winners.result.length > 0
+              ? roundCurrency(totalPot.result - distributed.result)
+              : totalPot.result,
+          goals:
+            winners.goals.length > 0
+              ? roundCurrency(totalPot.goals - distributed.goals)
+              : totalPot.goals,
+          exact:
+            winners.exact.length > 0
+              ? roundCurrency(totalPot.exact - distributed.exact)
+              : totalPot.exact,
+        })
+      : carry;
+
+    const earningsByUser: Record<string, number> = {};
+
+    for (const winnerId of winners.result) {
+      earningsByUser[winnerId] = roundCurrency(
+        (earningsByUser[winnerId] ?? 0) + payoutPerWinner.result,
+      );
+      winningsByUser[winnerId] = roundCurrency(
+        (winningsByUser[winnerId] ?? 0) + payoutPerWinner.result,
+      );
+    }
+
+    for (const winnerId of winners.goals) {
+      earningsByUser[winnerId] = roundCurrency(
+        (earningsByUser[winnerId] ?? 0) + payoutPerWinner.goals,
+      );
+      winningsByUser[winnerId] = roundCurrency(
+        (winningsByUser[winnerId] ?? 0) + payoutPerWinner.goals,
+      );
+    }
+
+    for (const winnerId of winners.exact) {
+      earningsByUser[winnerId] = roundCurrency(
+        (earningsByUser[winnerId] ?? 0) + payoutPerWinner.exact,
+      );
+      winningsByUser[winnerId] = roundCurrency(
+        (winningsByUser[winnerId] ?? 0) + payoutPerWinner.exact,
+      );
+    }
+
+    matchBreakdowns[game.id] = {
+      gameId: game.id,
+      winners,
+      incomingRollover: carry,
+      basePot,
+      totalPot,
+      payoutPerWinner,
+      distributed,
+      rolloverOut,
+      earningsByUser,
+    };
+
+    if (isSettled) {
+      carry = rolloverOut;
+    }
+  }
+
+  const finalAwards = getFinalAwardWinners(
+    participants,
+    state.specialPicks,
+    state.awards.champion,
+    state.awards.topScorer,
+    games,
+    state.results,
+    exactHitsByUser,
+  );
+
+  for (const userId of finalAwards.exactHitsWinners) {
+    winningsByUser[userId] = roundCurrency(
+      (winningsByUser[userId] ?? 0) + finalAwards.exactHitsAwardPerWinner,
+    );
+  }
+
+  for (const userId of finalAwards.championWinners) {
+    winningsByUser[userId] = roundCurrency(
+      (winningsByUser[userId] ?? 0) + finalAwards.championAwardPerWinner,
+    );
+  }
+
+  for (const userId of finalAwards.topScorerWinners) {
+    winningsByUser[userId] = roundCurrency(
+      (winningsByUser[userId] ?? 0) + finalAwards.topScorerAwardPerWinner,
+    );
+  }
+
+  return {
+    participantCount,
+    matchBreakdowns,
+    winningsByUser,
+    exactHitsByUser,
+    resultHitsByUser,
+    finalAwards,
   };
 }
 
@@ -275,11 +700,6 @@ function resolveThirdPlaceSlots(
 
   return assignment;
 }
-
-function getResultMap(results: MatchResult[]) {
-  return new Map(results.map((result) => [result.gameId, result] as const));
-}
-
 function getWinner(game: ResolvedGame, result: MatchResult | undefined) {
   if (
     !result?.finished ||

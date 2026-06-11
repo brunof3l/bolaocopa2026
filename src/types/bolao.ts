@@ -120,12 +120,18 @@ export type AppState = {
 export type RankingEntry = {
   userId: string;
   name: string;
-  balance: number;
+  grossWinnings: number;
+  matchWinnings: number;
+  finalAwardsWinnings: number;
+  netSettlement: number;
   exactHits: number;
   resultHits: number;
   championHit: boolean;
   topScorerHit: boolean;
-  paidAwardsTotal: number;
+  championAward: number;
+  topScorerAward: number;
+  exactHitsAward: number;
+  settlementLabel: "A Receber" | "A Pagar" | "Zerado";
 };
 
 export type StandingEntry = {
@@ -168,7 +174,50 @@ export type PredictionReward = {
   resultHit: boolean;
   goalsHit: boolean;
   exactHit: boolean;
-  resultReward: number;
-  goalsReward: number;
-  exactScoreReward: number;
+  resultAmount: number;
+  goalsAmount: number;
+  exactAmount: number;
+};
+
+export type SharedPot = {
+  result: number;
+  goals: number;
+  exact: number;
+};
+
+export type MatchPoolBreakdown = {
+  gameId: string;
+  winners: {
+    result: string[];
+    goals: string[];
+    exact: string[];
+  };
+  incomingRollover: SharedPot;
+  basePot: SharedPot;
+  totalPot: SharedPot;
+  payoutPerWinner: SharedPot;
+  distributed: SharedPot;
+  rolloverOut: SharedPot;
+  earningsByUser: Record<string, number>;
+};
+
+export type FinalAwardBreakdown = {
+  championWinners: string[];
+  championAwardPerWinner: number;
+  championPot: number;
+  exactHitsWinners: string[];
+  exactHitsAwardPerWinner: number;
+  exactHitsPot: number;
+  topScorerWinners: string[];
+  topScorerAwardPerWinner: number;
+  topScorerPot: number;
+};
+
+export type TournamentFinanceSummary = {
+  participantCount: number;
+  matchBreakdowns: Record<string, MatchPoolBreakdown>;
+  winningsByUser: Record<string, number>;
+  exactHitsByUser: Record<string, number>;
+  resultHitsByUser: Record<string, number>;
+  finalAwards: FinalAwardBreakdown;
 };

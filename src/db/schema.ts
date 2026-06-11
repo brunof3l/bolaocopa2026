@@ -30,6 +30,27 @@ export const matches = pgTable("matches", {
   teamB: text("team_b").notNull(),
   group: text("group").notNull(),
   matchDate: timestamp("match_date", { withTimezone: true }).notNull(),
+  rolloverResult: numeric("rollover_result", {
+    precision: 10,
+    scale: 2,
+    mode: "number",
+  })
+    .notNull()
+    .default(sql`0.00`),
+  rolloverGoals: numeric("rollover_goals", {
+    precision: 10,
+    scale: 2,
+    mode: "number",
+  })
+    .notNull()
+    .default(sql`0.00`),
+  rolloverExact: numeric("rollover_exact", {
+    precision: 10,
+    scale: 2,
+    mode: "number",
+  })
+    .notNull()
+    .default(sql`0.00`),
   scoreA: integer("score_a"),
   scoreB: integer("score_b"),
   status: matchStatusEnum("status").notNull().default("SCHEDULED"),

@@ -1,12 +1,15 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 
 import { getDb } from "@/db";
 import { guesses, matches, users } from "@/db/schema";
-import { calculatePredictionReward } from "@/lib/tournamentEngine";
-import type { MatchResult, Prediction } from "@/types/bolao";
+import {
+  getPredictionHits,
+  roundDownCurrency,
+  sharedPotContribution,
+} from "@/lib/tournamentEngine";
 
 type SaveGuessInput = {
   userId: string;
@@ -24,6 +27,7 @@ type UpdateOfficialResultInput = {
 };
 
 const db = getDb();
+const guessCloseWindowMs = 60 * 1000;
 
 function normalizeScore(value: number) {
   if (!Number.isFinite(value) || value < 0) {
@@ -36,7 +40,7 @@ function normalizeScore(value: number) {
 function canEditGuess(matchDate: Date, bypassWindow = false) {
   const now = Date.now();
   const kickoff = matchDate.getTime();
-  const opensAt = kickoff - 48 * 60 * 60 * 1000;
+  const closesAt = kickoff - guessCloseWindowMs;
 
   if (now >= kickoff) {
     return false;
@@ -46,29 +50,165 @@ function canEditGuess(matchDate: Date, bypassWindow = false) {
     return true;
   }
 
-  return now >= opensAt;
+  return now < closesAt;
 }
 
-async function recalculateUserBalances(
-  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
-  userIds: string[],
-) {
-  if (!userIds.length) {
-    return;
+function roundCurrency(value: number) {
+  return Number(value.toFixed(2));
+}
+
+type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+async function recalculateAllFinancials(tx: Transaction) {
+  const allUsers = await tx.select({ id: users.id }).from(users);
+  const allMatches = await tx.select().from(matches).orderBy(asc(matches.matchDate));
+  const allGuesses = await tx.select().from(guesses);
+  const guessesByMatchId = new Map<string, typeof allGuesses>();
+  const winningsByUser = new Map<string, number>();
+  const participantCount = allUsers.length;
+
+  for (const user of allUsers) {
+    winningsByUser.set(user.id, 0);
   }
 
-  for (const userId of userIds) {
-    const [aggregate] = await tx
-      .select({
-        total: sql<number>`coalesce(sum(${guesses.earnedBalance}), 0)`,
-      })
-      .from(guesses)
-      .where(eq(guesses.userId, userId));
+  for (const guess of allGuesses) {
+    const matchGuesses = guessesByMatchId.get(guess.matchId) ?? [];
+    matchGuesses.push(guess);
+    guessesByMatchId.set(guess.matchId, matchGuesses);
+  }
 
+  let rolloverResult = 0;
+  let rolloverGoals = 0;
+  let rolloverExact = 0;
+
+  for (const match of allMatches) {
+    await tx
+      .update(matches)
+      .set({
+        rolloverResult: roundCurrency(rolloverResult),
+        rolloverGoals: roundCurrency(rolloverGoals),
+        rolloverExact: roundCurrency(rolloverExact),
+      })
+      .where(eq(matches.id, match.id));
+
+    const matchGuesses = guessesByMatchId.get(match.id) ?? [];
+    const totalResultPot = roundCurrency(
+      participantCount * sharedPotContribution.result + rolloverResult,
+    );
+    const totalGoalsPot = roundCurrency(
+      participantCount * sharedPotContribution.goals + rolloverGoals,
+    );
+    const totalExactPot = roundCurrency(
+      participantCount * sharedPotContribution.exact + rolloverExact,
+    );
+    const isSettled =
+      match.status === "FINISHED" && match.scoreA !== null && match.scoreB !== null;
+
+    if (!isSettled) {
+      for (const guess of matchGuesses) {
+        await tx
+          .update(guesses)
+          .set({ earnedBalance: 0 })
+          .where(eq(guesses.id, guess.id));
+      }
+      continue;
+    }
+
+    const winners = {
+      result: [] as string[],
+      goals: [] as string[],
+      exact: [] as string[],
+    };
+
+    for (const guess of matchGuesses) {
+      const hits = getPredictionHits(
+        {
+          userId: guess.userId,
+          gameId: guess.matchId,
+          homeScore: guess.guessA,
+          awayScore: guess.guessB,
+          updatedAt: new Date().toISOString(),
+        },
+        {
+          gameId: guess.matchId,
+          homeScore: match.scoreA,
+          awayScore: match.scoreB,
+          finished: true,
+        },
+      );
+
+      if (hits.resultHit) {
+        winners.result.push(guess.userId);
+      }
+
+      if (hits.goalsHit) {
+        winners.goals.push(guess.userId);
+      }
+
+      if (hits.exactHit) {
+        winners.exact.push(guess.userId);
+      }
+    }
+
+    const resultPayout = winners.result.length
+      ? roundDownCurrency(totalResultPot / winners.result.length)
+      : 0;
+    const goalsPayout = winners.goals.length
+      ? roundDownCurrency(totalGoalsPot / winners.goals.length)
+      : 0;
+    const exactPayout = winners.exact.length
+      ? roundDownCurrency(totalExactPot / winners.exact.length)
+      : 0;
+
+    rolloverResult = winners.result.length
+      ? roundCurrency(totalResultPot - resultPayout * winners.result.length)
+      : totalResultPot;
+    rolloverGoals = winners.goals.length
+      ? roundCurrency(totalGoalsPot - goalsPayout * winners.goals.length)
+      : totalGoalsPot;
+    rolloverExact = winners.exact.length
+      ? roundCurrency(totalExactPot - exactPayout * winners.exact.length)
+      : totalExactPot;
+
+    for (const guess of matchGuesses) {
+      const hits = getPredictionHits(
+        {
+          userId: guess.userId,
+          gameId: guess.matchId,
+          homeScore: guess.guessA,
+          awayScore: guess.guessB,
+          updatedAt: new Date().toISOString(),
+        },
+        {
+          gameId: guess.matchId,
+          homeScore: match.scoreA,
+          awayScore: match.scoreB,
+          finished: true,
+        },
+      );
+      const earnedBalance = roundCurrency(
+        (hits.resultHit ? resultPayout : 0) +
+          (hits.goalsHit ? goalsPayout : 0) +
+          (hits.exactHit ? exactPayout : 0),
+      );
+
+      await tx
+        .update(guesses)
+        .set({ earnedBalance })
+        .where(eq(guesses.id, guess.id));
+
+      winningsByUser.set(
+        guess.userId,
+        roundCurrency((winningsByUser.get(guess.userId) ?? 0) + earnedBalance),
+      );
+    }
+  }
+
+  for (const user of allUsers) {
     await tx
       .update(users)
-      .set({ totalBalance: Number(aggregate?.total ?? 0) })
-      .where(eq(users.id, userId));
+      .set({ totalBalance: roundCurrency(winningsByUser.get(user.id) ?? 0) })
+      .where(eq(users.id, user.id));
   }
 }
 
@@ -99,29 +239,13 @@ export async function saveGuessAction(input: SaveGuessInput) {
       )
       .limit(1);
 
-    const reward = calculatePredictionReward(
-      {
-        userId: input.userId,
-        gameId: input.matchId,
-        homeScore: guessA,
-        awayScore: guessB,
-        updatedAt: new Date().toISOString(),
-      },
-      {
-        gameId: input.matchId,
-        homeScore: match.scoreA,
-        awayScore: match.scoreB,
-        finished: match.status === "FINISHED",
-      },
-    );
-
     if (existingGuess) {
       await tx
         .update(guesses)
         .set({
           guessA,
           guessB,
-          earnedBalance: reward.amount,
+          earnedBalance: 0,
         })
         .where(eq(guesses.id, existingGuess.id));
     } else {
@@ -130,16 +254,16 @@ export async function saveGuessAction(input: SaveGuessInput) {
         matchId: input.matchId,
         guessA,
         guessB,
-        earnedBalance: reward.amount,
+        earnedBalance: 0,
       });
     }
 
-    await recalculateUserBalances(tx, [input.userId]);
+    await recalculateAllFinancials(tx);
     revalidatePath("/");
 
     return {
       ok: true,
-      earnedBalance: reward.amount,
+      earnedBalance: 0,
     };
   });
 }
@@ -171,46 +295,12 @@ export async function updateOfficialResultAction(
       throw new Error("Jogo nao encontrado para atualizacao.");
     }
 
-    const matchGuesses = await tx
-      .select()
-      .from(guesses)
-      .where(eq(guesses.matchId, input.matchId));
-
-    const affectedUserIds = new Set<string>();
-
-    for (const guess of matchGuesses) {
-      const reward = calculatePredictionReward(
-        {
-          userId: guess.userId,
-          gameId: guess.matchId,
-          homeScore: guess.guessA,
-          awayScore: guess.guessB,
-          updatedAt: new Date().toISOString(),
-        } satisfies Prediction,
-        {
-          gameId: updatedMatch.id,
-          homeScore: updatedMatch.scoreA,
-          awayScore: updatedMatch.scoreB,
-          finished: updatedMatch.status === "FINISHED",
-        } satisfies MatchResult,
-      );
-
-      await tx
-        .update(guesses)
-        .set({
-          earnedBalance: reward.amount,
-        })
-        .where(eq(guesses.id, guess.id));
-
-      affectedUserIds.add(guess.userId);
-    }
-
-    await recalculateUserBalances(tx, [...affectedUserIds]);
+    await recalculateAllFinancials(tx);
     revalidatePath("/");
 
     return {
       ok: true,
-      affectedUsers: affectedUserIds.size,
+      affectedUsers: updatedMatch.id ? 1 : 0,
     };
   });
 }
@@ -259,16 +349,12 @@ export async function getMatchWithGuessesAction(matchId: string) {
 
 export async function syncAllUserBalancesAction() {
   return db.transaction(async (tx) => {
-    const allUsers = await tx.select({ id: users.id }).from(users);
-    await recalculateUserBalances(
-      tx,
-      allUsers.map((user) => user.id),
-    );
+    await recalculateAllFinancials(tx);
     revalidatePath("/");
 
     return {
       ok: true,
-      usersUpdated: allUsers.length,
+      usersUpdated: true,
     };
   });
 }

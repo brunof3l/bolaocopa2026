@@ -1,6 +1,7 @@
 import type {
   AppState,
   Game,
+  MatchPoolBreakdown,
   MatchResult,
   Participant,
   PredictionAvailability,
@@ -10,11 +11,11 @@ import type {
   ResolvedGame,
   SpecialPick,
 } from "@/types/bolao";
-import { calculatePredictionReward } from "@/lib/tournamentEngine";
-
-const EXACT_HIT_PRIZE = 20;
-const CHAMPION_PRIZE = 30;
-const TOP_SCORER_PRIZE = 5;
+import {
+  calculatePredictionReward,
+  calculateTournamentFinance,
+  TOURNAMENT_INVESTMENT_TOTAL,
+} from "@/lib/tournamentEngine";
 
 export function getFlagEmoji(countryCode: string) {
   if (!/^[A-Z]{2}$/i.test(countryCode)) {
@@ -57,8 +58,9 @@ export function formatCurrency(value: number) {
 export function getPredictionReward(
   prediction: Prediction | undefined,
   result: MatchResult | undefined,
+  breakdown?: MatchPoolBreakdown,
 ) : PredictionReward {
-  return calculatePredictionReward(prediction, result);
+  return calculatePredictionReward(prediction, result, breakdown);
 }
 
 export function groupGamesByMatchday(games: Game[]) {
@@ -102,57 +104,56 @@ export function buildRanking(
   games: Array<Game | ResolvedGame>,
   state: AppState,
 ): RankingEntry[] {
-  const finishedResults = new Map(
-    state.results.map((result) => [result.gameId, result] as const),
-  );
+  const financeSummary = calculateTournamentFinance(participants, games, state);
 
-  const entries = participants.map((participant) => {
-    let balance = 0;
-    let exactHits = 0;
-    let resultHits = 0;
+  return participants
+    .map((participant) => {
+      const grossWinnings = financeSummary.winningsByUser[participant.id] ?? 0;
+      const championHit = financeSummary.finalAwards.championWinners.includes(participant.id);
+      const topScorerHit = financeSummary.finalAwards.topScorerWinners.includes(
+        participant.id,
+      );
+      const championAward = championHit
+        ? financeSummary.finalAwards.championAwardPerWinner
+        : 0;
+      const topScorerAward = topScorerHit
+        ? financeSummary.finalAwards.topScorerAwardPerWinner
+        : 0;
+      const exactHitsAward = financeSummary.finalAwards.exactHitsWinners.includes(
+        participant.id,
+      )
+        ? financeSummary.finalAwards.exactHitsAwardPerWinner
+        : 0;
+      const finalAwardsWinnings = championAward + topScorerAward + exactHitsAward;
+      const matchWinnings = grossWinnings - finalAwardsWinnings;
+      const netSettlement = grossWinnings - TOURNAMENT_INVESTMENT_TOTAL;
+      const settlementLabel: RankingEntry["settlementLabel"] =
+        netSettlement > 0
+          ? "A Receber"
+          : netSettlement < 0
+            ? "A Pagar"
+            : "Zerado";
 
-    for (const game of games) {
-      const prediction = getPrediction(state.predictions, participant.id, game.id);
-      const result = finishedResults.get(game.id);
-      const reward = getPredictionReward(prediction, result);
-
-      balance += reward.amount;
-      exactHits += Number(reward.exactHit);
-      resultHits += Number(reward.resultHit);
-    }
-
-    const pick = getSpecialPick(state.specialPicks, participant.id);
-    const championHit =
-      Boolean(state.awards.champion) && pick?.champion === state.awards.champion;
-    const topScorerHit =
-      Boolean(state.awards.topScorer) && pick?.topScorer === state.awards.topScorer;
-
-    return {
-      userId: participant.id,
-      name: participant.name,
-      balance,
-      exactHits,
-      resultHits,
-      championHit,
-      topScorerHit,
-      paidAwardsTotal:
-        (championHit ? CHAMPION_PRIZE : 0) +
-        (topScorerHit ? TOP_SCORER_PRIZE : 0),
-    };
-  });
-
-  const maxExactHits = Math.max(...entries.map((entry) => entry.exactHits), 0);
-
-  return entries
-    .map((entry) => ({
-      ...entry,
-      paidAwardsTotal:
-        entry.paidAwardsTotal +
-        (maxExactHits > 0 && entry.exactHits === maxExactHits ? EXACT_HIT_PRIZE : 0),
-    }))
+      return {
+        userId: participant.id,
+        name: participant.name,
+        grossWinnings,
+        matchWinnings,
+        finalAwardsWinnings,
+        netSettlement,
+        exactHits: financeSummary.exactHitsByUser[participant.id] ?? 0,
+        resultHits: financeSummary.resultHitsByUser[participant.id] ?? 0,
+        championHit,
+        topScorerHit,
+        championAward,
+        topScorerAward,
+        exactHitsAward,
+        settlementLabel,
+      };
+    })
     .sort((left, right) => {
-      if (right.balance !== left.balance) {
-        return right.balance - left.balance;
+      if (right.grossWinnings !== left.grossWinnings) {
+        return right.grossWinnings - left.grossWinnings;
       }
 
       if (right.exactHits !== left.exactHits) {
@@ -213,9 +214,7 @@ export function getPredictionAvailability(
 
   const kickoffTime = new Date(game.kickoff).getTime();
   const nowTime = now.getTime();
-  const opensAt = kickoffTime - 48 * 60 * 60 * 1000;
-  const isFirstRoundGroupGame =
-    game.stage === "group" && game.matchdayLabel.endsWith("Rodada 1");
+  const closesAt = kickoffTime - 60 * 1000;
 
   if (nowTime >= kickoffTime) {
     return {
@@ -224,35 +223,48 @@ export function getPredictionAvailability(
     };
   }
 
-  if (isFirstRoundGroupGame) {
+  if (nowTime >= closesAt) {
     return {
-      status: "open",
-      message: "Excecao da 1a rodada: aberto ate o apito inicial",
-    };
-  }
-
-  if (nowTime < opensAt) {
-    return {
-      status: "pending",
-      message: `Abre em ${formatFullDateTime(new Date(opensAt).toISOString())}`,
+      status: "locked",
+      message: "Palpite travado 1 minuto antes do apito inicial.",
     };
   }
 
   return {
     status: "open",
-    message: "Janela de palpite aberta",
+    message: `Aberto ate ${formatFullDateTime(new Date(closesAt).toISOString())}`,
+  };
+}
+
+export function getSpecialPickAvailability(
+  firstKickoff: string,
+  now = new Date(),
+): PredictionAvailability {
+  const firstKickoffTime = new Date(firstKickoff).getTime();
+  const nowTime = now.getTime();
+
+  if (nowTime >= firstKickoffTime) {
+    return {
+      status: "locked",
+      message: "Campeao e artilheiro travados no apito inicial da Copa.",
+    };
+  }
+
+  return {
+    status: "open",
+    message: `Aberto ate ${formatFullDateTime(firstKickoff)}`,
   };
 }
 
 export const scoringRules = [
-  { label: "Acertou resultado (1x2)", value: 0.5 },
-  { label: "Acertou gols de uma equipe", value: 1.0 },
-  { label: "Cravou o placar exato", value: 1.5 },
-  { label: "Maximo por jogo", value: 3.0 },
+  { label: "Pote de Resultado por usuario", value: 0.5 },
+  { label: "Pote de Gols por usuario", value: 1.0 },
+  { label: "Pote de Placar Exato por usuario", value: 1.5 },
+  { label: "Investimento por jogo", value: 3.0 },
 ];
 
 export const awardRules = [
-  { label: "Mais placares cravados", prize: EXACT_HIT_PRIZE },
-  { label: "Acertou o campeao", prize: CHAMPION_PRIZE },
-  { label: "Acertou o artilheiro", prize: TOP_SCORER_PRIZE },
+  { label: "Mais placares cravados", prize: 20 },
+  { label: "Acertou o campeao", prize: 30 },
+  { label: "Acertou o artilheiro", prize: 5 },
 ];
