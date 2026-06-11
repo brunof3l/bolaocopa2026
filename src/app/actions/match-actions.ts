@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 
 import { getDb } from "@/db";
-import { guesses, matches, users } from "@/db/schema";
+import { guesses, matches, officialResults, users } from "@/db/schema";
 import {
   getPredictionHits,
   roundDownCurrency,
@@ -24,6 +24,13 @@ type UpdateOfficialResultInput = {
   scoreA: number | null;
   scoreB: number | null;
   status: "SCHEDULED" | "FINISHED";
+};
+
+type SaveOfficialAppResultInput = {
+  gameId: string;
+  homeScore: number | null;
+  awayScore: number | null;
+  finished: boolean;
 };
 
 const db = getDb();
@@ -303,6 +310,45 @@ export async function updateOfficialResultAction(
       affectedUsers: updatedMatch.id ? 1 : 0,
     };
   });
+}
+
+export async function saveOfficialAppResultAction(input: SaveOfficialAppResultInput) {
+  const homeScore = input.homeScore === null ? null : normalizeScore(input.homeScore);
+  const awayScore = input.awayScore === null ? null : normalizeScore(input.awayScore);
+
+  if (input.finished && (homeScore === null || awayScore === null)) {
+    throw new Error("Informe os dois placares para marcar o jogo como encerrado.");
+  }
+
+  await db
+    .insert(officialResults)
+    .values({
+      gameId: input.gameId,
+      homeScore,
+      awayScore,
+      finished: input.finished,
+    })
+    .onConflictDoUpdate({
+      target: officialResults.gameId,
+      set: {
+        homeScore,
+        awayScore,
+        finished: input.finished,
+        updatedAt: new Date(),
+      },
+    });
+
+  revalidatePath("/");
+
+  return {
+    ok: true,
+    result: {
+      gameId: input.gameId,
+      homeScore,
+      awayScore,
+      finished: input.finished,
+    },
+  };
 }
 
 export async function getFinancialLeaderboardAction() {

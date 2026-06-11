@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -23,7 +25,11 @@ import {
   X,
 } from "lucide-react";
 
-import { seedUsersIfMissingAction } from "@/app/actions/match-actions";
+import {
+  saveOfficialAppResultAction,
+  seedUsersIfMissingAction,
+} from "@/app/actions/match-actions";
+import { BolaoNav } from "@/components/bolao-nav";
 import { CountryFlag } from "@/components/country-flag";
 import {
   gamesData,
@@ -68,8 +74,10 @@ import type {
   Team,
 } from "@/types/bolao";
 
-type TabKey = "acesso" | "palpites" | "ranking" | "admin";
+type AppPageKey = "menu" | "acesso" | "palpites" | "ranking" | "admin";
 const LOCAL_STORAGE_PARTICIPANTS_KEY = "bolao-copa-2026-participants";
+const LOCAL_STORAGE_STATE_KEY = "bolao-copa-2026-app-state";
+const LOCAL_STORAGE_SELECTED_USER_KEY = "bolao-copa-2026-selected-user";
 const participantAccentPalette = [
   "#10b981",
   "#0ea5e9",
@@ -92,37 +100,36 @@ const tabTransition = {
   transition: { duration: 0.24, ease: "easeOut" as const },
 };
 
-const tabs: Array<{
-  key: TabKey;
-  label: string;
-  description: string;
-  icon: React.ReactNode;
-}> = [
-  {
-    key: "acesso",
+const pageMeta: Record<
+  AppPageKey,
+  { label: string; description: string; icon: React.ReactNode }
+> = {
+  menu: {
+    label: "Menu",
+    description: "Atalhos principais do bolao",
+    icon: <Trophy className="h-4 w-4" />,
+  },
+  acesso: {
     label: "Acesso",
     description: "Entrar e ver regras",
     icon: <LogIn className="h-4 w-4" />,
   },
-  {
-    key: "palpites",
+  palpites: {
     label: "Palpites",
     description: "Potes e trava de 1 min",
     icon: <Swords className="h-4 w-4" />,
   },
-  {
-    key: "ranking",
+  ranking: {
     label: "Ranking",
     description: "Tabela e chaveamento",
     icon: <Medal className="h-4 w-4" />,
   },
-  {
-    key: "admin",
+  admin: {
     label: "Admin",
     description: "Resultados oficiais",
     icon: <ShieldCheck className="h-4 w-4" />,
   },
-];
+};
 
 function parseScoreInput(value: string) {
   if (value.trim() === "") {
@@ -199,6 +206,71 @@ function mergeParticipants(
   return mergedParticipants;
 }
 
+function mergeInitialResults(remoteResults: MatchResult[]) {
+  const remoteResultsMap = new Map(
+    remoteResults.map((result) => [result.gameId, result] as const),
+  );
+
+  return initialState.results.map(
+    (result) => remoteResultsMap.get(result.gameId) ?? result,
+  );
+}
+
+function createInitialAppState(initialOfficialResults: MatchResult[]) {
+  const initialResults = mergeInitialResults(initialOfficialResults);
+
+  if (typeof window === "undefined") {
+    return {
+      ...initialState,
+      results: initialResults,
+    };
+  }
+
+  try {
+    const rawState = window.localStorage.getItem(LOCAL_STORAGE_STATE_KEY);
+
+    if (!rawState) {
+      return {
+        ...initialState,
+        results: initialResults,
+      };
+    }
+
+    const parsedState = JSON.parse(rawState) as Partial<AppState>;
+
+    return {
+      predictions: Array.isArray(parsedState.predictions)
+        ? parsedState.predictions
+        : initialState.predictions,
+      specialPicks: Array.isArray(parsedState.specialPicks)
+        ? parsedState.specialPicks
+        : initialState.specialPicks,
+      results: initialResults,
+      awards:
+        parsedState.awards &&
+        typeof parsedState.awards === "object" &&
+        "champion" in parsedState.awards &&
+        "topScorer" in parsedState.awards
+          ? {
+              champion:
+                typeof parsedState.awards.champion === "string"
+                  ? parsedState.awards.champion
+                  : null,
+              topScorer:
+                typeof parsedState.awards.topScorer === "string"
+                  ? parsedState.awards.topScorer
+                  : null,
+            }
+          : initialState.awards,
+    };
+  } catch {
+    return {
+      ...initialState,
+      results: initialResults,
+    };
+  }
+}
+
 function SectionCard({
   title,
   subtitle,
@@ -273,7 +345,7 @@ function StandingsTable({
   standings: StandingEntry[];
 }) {
   return (
-    <div className="glass-surface premium-scrollbar overflow-x-auto rounded-3xl">
+    <div className="glass-surface premium-scrollbar min-w-0 max-w-full overflow-x-auto rounded-3xl">
       <table className="min-w-full text-left text-sm">
         <thead className="bg-white/5 text-slate-300">
           <tr>
@@ -325,7 +397,7 @@ function BracketColumn({
   state: AppState;
 }) {
   return (
-    <div className="space-y-3">
+    <div className="min-w-0 space-y-3">
       <div className="glass-surface rounded-2xl px-4 py-3">
         <p className="text-sm font-semibold text-white">{title}</p>
       </div>
@@ -603,10 +675,15 @@ function DashboardAccordion({
 }
 
 export function BolaoApp({
+  currentPage,
   initialRemoteUserNames = [],
+  initialOfficialResults = [],
 }: {
+  currentPage: AppPageKey;
   initialRemoteUserNames?: string[];
+  initialOfficialResults?: MatchResult[];
 }) {
+  const router = useRouter();
   const [participantList, setParticipantList] = useState<Participant[]>(() => {
     const baseParticipants = mergeParticipants(participants, initialRemoteUserNames);
 
@@ -646,9 +723,20 @@ export function BolaoApp({
       return baseParticipants;
     }
   });
-  const [state, setState] = useState<AppState>(initialState);
-  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<TabKey>("acesso");
+  const [state, setState] = useState<AppState>(() =>
+    createInitialAppState(initialOfficialResults),
+  );
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(() => {
+    if (typeof window === "undefined") {
+      return null;
+    }
+
+    try {
+      return window.localStorage.getItem(LOCAL_STORAGE_SELECTED_USER_KEY);
+    } catch {
+      return null;
+    }
+  });
   const [openDashboardSection, setOpenDashboardSection] = useState<string | null>(
     "group-A",
   );
@@ -660,10 +748,18 @@ export function BolaoApp({
   const [participantFormError, setParticipantFormError] = useState("");
   const [participantFormSuccess, setParticipantFormSuccess] = useState("");
   const [isSavingParticipant, startSavingParticipant] = useTransition();
+  const [isSavingOfficialResult, startSavingOfficialResult] = useTransition();
+  const [savingOfficialGameId, setSavingOfficialGameId] = useState<string | null>(null);
+  const [confirmingOfficialGameId, setConfirmingOfficialGameId] = useState<string | null>(
+    null,
+  );
+  const [adminResultFeedback, setAdminResultFeedback] = useState("");
+  const [adminResultError, setAdminResultError] = useState("");
 
   const now = new Date();
   const selectedParticipant =
     participantList.find((participant) => participant.id === selectedUserId) ?? null;
+  const effectiveSelectedUserId = selectedParticipant?.id ?? null;
 
   const standingsByGroup = useMemo(
     () => calculateAllStandings(groupsData, gamesData, state.results, teamsById),
@@ -712,7 +808,6 @@ export function BolaoApp({
       prediction.homeScore !== null && prediction.awayScore !== null,
   ).length;
   const finishedGamesCount = state.results.filter((result) => result.finished).length;
-  const currentTab = tabs.find((tab) => tab.key === activeTab) ?? tabs[0];
   const exactLeaderCount = Math.max(...ranking.map((entry) => entry.exactHits), 0);
   const exactLeaders = ranking.filter(
     (entry) => exactLeaderCount > 0 && entry.exactHits === exactLeaderCount,
@@ -728,6 +823,7 @@ export function BolaoApp({
   const specialPickAvailability = firstTournamentKickoff
     ? getSpecialPickAvailability(firstTournamentKickoff, now)
     : { status: "locked" as const, message: "Calendario indisponivel" };
+  const currentPageInfo = pageMeta[currentPage];
 
   useEffect(() => {
     try {
@@ -739,6 +835,26 @@ export function BolaoApp({
       // Ignora indisponibilidade do storage para manter a tela funcional.
     }
   }, [participantList]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(LOCAL_STORAGE_STATE_KEY, JSON.stringify(state));
+    } catch {
+      // Ignora indisponibilidade do storage para manter a tela funcional.
+    }
+  }, [state]);
+
+  useEffect(() => {
+    try {
+      if (selectedUserId) {
+        window.localStorage.setItem(LOCAL_STORAGE_SELECTED_USER_KEY, selectedUserId);
+      } else {
+        window.localStorage.removeItem(LOCAL_STORAGE_SELECTED_USER_KEY);
+      }
+    } catch {
+      // Ignora indisponibilidade do storage para manter a tela funcional.
+    }
+  }, [selectedUserId]);
 
   const groupGamesMap = useMemo(
     () =>
@@ -769,13 +885,17 @@ export function BolaoApp({
   }
 
   function getPendingPredictionCount(games: ResolvedGame[]) {
-    if (!selectedUserId) {
+    if (!effectiveSelectedUserId) {
       return 0;
     }
 
     return games.filter((game) => {
       const availability = getPredictionAvailability(game, now);
-      const prediction = getPrediction(state.predictions, selectedUserId, game.id);
+      const prediction = getPrediction(
+        state.predictions,
+        effectiveSelectedUserId,
+        game.id,
+      );
 
       return (
         availability.status === "open" &&
@@ -810,7 +930,7 @@ export function BolaoApp({
     side: "homeScore" | "awayScore",
     value: string,
   ) {
-    if (!selectedUserId) {
+    if (!effectiveSelectedUserId) {
       return;
     }
 
@@ -823,12 +943,12 @@ export function BolaoApp({
     setState((currentState) => {
       const existingPrediction = getPrediction(
         currentState.predictions,
-        selectedUserId,
+        effectiveSelectedUserId,
         gameId,
       );
 
       const nextPrediction: Prediction = {
-        userId: selectedUserId,
+        userId: effectiveSelectedUserId,
         gameId,
         homeScore:
           side === "homeScore"
@@ -849,24 +969,24 @@ export function BolaoApp({
   }
 
   function handleSpecialPickChange(field: "champion" | "topScorer", value: string) {
-    if (!selectedUserId || specialPickAvailability.status !== "open") {
+    if (!effectiveSelectedUserId || specialPickAvailability.status !== "open") {
       return;
     }
 
     setState((currentState) => {
       const nextSpecialPicks = currentState.specialPicks.map((pick) =>
-        pick.userId === selectedUserId ? { ...pick, [field]: value } : pick,
+        pick.userId === effectiveSelectedUserId ? { ...pick, [field]: value } : pick,
       );
 
       return {
         ...currentState,
         specialPicks:
-          nextSpecialPicks.some((pick) => pick.userId === selectedUserId)
+          nextSpecialPicks.some((pick) => pick.userId === effectiveSelectedUserId)
             ? nextSpecialPicks
             : [
                 ...currentState.specialPicks,
                 {
-                  userId: selectedUserId,
+                  userId: effectiveSelectedUserId,
                   champion: field === "champion" ? value : "",
                   topScorer: field === "topScorer" ? value : "",
                 },
@@ -880,6 +1000,10 @@ export function BolaoApp({
     side: "homeScore" | "awayScore",
     value: string,
   ) {
+    if (confirmingOfficialGameId === gameId) {
+      setConfirmingOfficialGameId(null);
+    }
+
     setState((currentState) => {
       const existingResult =
         currentState.results.find((result) => result.gameId === gameId) ?? null;
@@ -905,6 +1029,10 @@ export function BolaoApp({
   }
 
   function handleResultFinished(gameId: string, finished: boolean) {
+    if (confirmingOfficialGameId === gameId) {
+      setConfirmingOfficialGameId(null);
+    }
+
     setState((currentState) => {
       const existingResult =
         currentState.results.find((result) => result.gameId === gameId) ?? null;
@@ -920,6 +1048,44 @@ export function BolaoApp({
         ...currentState,
         results: upsertResult(currentState.results, nextResult),
       };
+    });
+  }
+
+  function persistOfficialResult(gameId: string) {
+    const result = state.results.find((item) => item.gameId === gameId);
+
+    if (!result) {
+      setAdminResultError("Resultado nao encontrado para salvar.");
+      setAdminResultFeedback("");
+      return;
+    }
+
+    setSavingOfficialGameId(gameId);
+    setConfirmingOfficialGameId(null);
+    setAdminResultError("");
+    setAdminResultFeedback("");
+
+    startSavingOfficialResult(async () => {
+      try {
+        const response = await saveOfficialAppResultAction({
+          gameId,
+          homeScore: result.homeScore,
+          awayScore: result.awayScore,
+          finished: result.finished,
+        });
+
+        setState((currentState) => ({
+          ...currentState,
+          results: upsertResult(currentState.results, response.result),
+        }));
+        setAdminResultFeedback(`Resultado do jogo ${gameId} salvo no banco.`);
+      } catch (error) {
+        setAdminResultError(
+          error instanceof Error ? error.message : "Nao foi possivel salvar o resultado.",
+        );
+      } finally {
+        setSavingOfficialGameId(null);
+      }
     });
   }
 
@@ -981,24 +1147,29 @@ export function BolaoApp({
     setTimeout(() => {
       setIsCreateParticipantOpen(false);
       setParticipantFormSuccess("");
-      setActiveTab("palpites");
+      router.push("/palpites");
     }, 500);
   }
 
   function resetDemoData() {
-    setState(initialState);
+    setState({
+      ...initialState,
+      results: mergeInitialResults(initialOfficialResults),
+    });
     setParticipantList(mergeParticipants(participants, initialRemoteUserNames));
     setSelectedUserId(null);
-    setActiveTab("acesso");
     setIsCreateParticipantOpen(false);
     setParticipantFormError("");
     setParticipantFormSuccess("");
     setNewParticipantName("");
     try {
       window.localStorage.removeItem(LOCAL_STORAGE_PARTICIPANTS_KEY);
+      window.localStorage.removeItem(LOCAL_STORAGE_STATE_KEY);
+      window.localStorage.removeItem(LOCAL_STORAGE_SELECTED_USER_KEY);
     } catch {
       // Mantem o reset funcional mesmo sem acesso ao storage.
     }
+    router.push("/");
   }
 
   return (
@@ -1050,42 +1221,115 @@ export function BolaoApp({
           </div>
         </header>
 
-        <section className="glass-surface rounded-3xl p-3">
-          <div className="grid gap-2 md:grid-cols-4">
-            {tabs.map((tab) => {
-              const isActive = tab.key === activeTab;
+        <BolaoNav />
 
-              return (
-                <button
-                  key={tab.key}
-                  type="button"
-                  onClick={() => setActiveTab(tab.key)}
-                  className={`rounded-2xl border px-4 py-3 text-left transition active:scale-95 ${
-                    isActive
-                      ? "border-emerald-300/40 bg-emerald-400/12 text-white shadow-[0_12px_30px_rgba(16,185,129,0.12)]"
-                      : "border-white/8 bg-white/[0.03] text-slate-300 hover:scale-[1.02] hover:border-white/20 hover:bg-white/[0.06]"
-                  }`}
-                >
-                  <div className="flex items-center gap-2 text-sm font-semibold">
-                    {tab.icon}
-                    {tab.label}
-                  </div>
-                  <p className="mt-1 text-xs text-slate-400">{tab.description}</p>
-                </button>
-              );
-            })}
-          </div>
+        <section className="glass-surface rounded-3xl p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="rounded-2xl border border-white/8 bg-white/5 p-3 text-emerald-300">
+                {currentPageInfo.icon}
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-white">{currentPageInfo.label}</p>
+                <p className="text-sm text-slate-400">{currentPageInfo.description}</p>
+              </div>
+            </div>
 
-          <div className="mt-3 rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm text-slate-300">
-            <span className="font-semibold text-white">{currentTab.label}</span>
-            {selectedParticipant
-              ? ` · Usuario ativo: ${selectedParticipant.name}`
-              : " · Nenhum usuario selecionado"}
+            <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm text-slate-300">
+              {selectedParticipant
+                ? `Usuario ativo: ${selectedParticipant.name}`
+                : "Nenhum usuario selecionado"}
+            </div>
           </div>
         </section>
 
         <AnimatePresence mode="wait">
-        {activeTab === "acesso" && (
+        {currentPage === "menu" && (
+          <motion.div key="page-menu" {...tabTransition}>
+            <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
+              <SectionCard
+                title="Menu"
+                subtitle="Escolha a area principal do bolao"
+                icon={<Trophy className="h-6 w-6" />}
+              >
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Link
+                    href="/acesso"
+                    className="rounded-2xl border border-white/8 bg-black/20 p-4 transition hover:border-white/20 hover:bg-white/5"
+                  >
+                    <p className="font-semibold text-white">Acesso</p>
+                    <p className="mt-1 text-sm text-slate-400">
+                      Selecionar participante, cadastrar novo nome e revisar as regras.
+                    </p>
+                  </Link>
+                  <Link
+                    href="/palpites"
+                    className="rounded-2xl border border-white/8 bg-black/20 p-4 transition hover:border-white/20 hover:bg-white/5"
+                  >
+                    <p className="font-semibold text-white">Palpites</p>
+                    <p className="mt-1 text-sm text-slate-400">
+                      Preencher jogos, campeao e artilheiro com foco total no mobile.
+                    </p>
+                  </Link>
+                  <Link
+                    href="/ranking"
+                    className="rounded-2xl border border-white/8 bg-black/20 p-4 transition hover:border-white/20 hover:bg-white/5"
+                  >
+                    <p className="font-semibold text-white">Ranking</p>
+                    <p className="mt-1 text-sm text-slate-400">
+                      Ver ganhos, acerto de contas, grupos e chaveamento.
+                    </p>
+                  </Link>
+                  <Link
+                    href="/admin"
+                    className="rounded-2xl border border-white/8 bg-black/20 p-4 transition hover:border-white/20 hover:bg-white/5"
+                  >
+                    <p className="font-semibold text-white">Admin</p>
+                    <p className="mt-1 text-sm text-slate-400">
+                      Salvar resultados oficiais com confirmacao antes de gravar.
+                    </p>
+                  </Link>
+                </div>
+
+                <div className="mt-5 rounded-2xl border border-emerald-400/15 bg-emerald-400/5 p-4 text-sm text-emerald-100/90">
+                  Navegue por paginas dedicadas para reduzir o comprimento da tela no
+                  celular e deixar cada area mais direta.
+                </div>
+              </SectionCard>
+
+              <SectionCard
+                title="Resumo"
+                subtitle="Visao rapida do torneio e do estado atual"
+                icon={<CalendarDays className="h-6 w-6" />}
+              >
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <StatCard
+                    label="Participantes"
+                    value={String(participantList.length)}
+                    helper="Grupo atual do bolao"
+                  />
+                  <StatCard
+                    label="Jogos finalizados"
+                    value={String(finishedGamesCount)}
+                    helper="Resultados oficiais persistidos"
+                  />
+                  <StatCard
+                    label="Palpites preenchidos"
+                    value={String(predictionsCount)}
+                    helper="Mantidos na navegacao via storage"
+                  />
+                  <StatCard
+                    label="Investimento"
+                    value={formatCurrency(TOURNAMENT_INVESTMENT_TOTAL)}
+                    helper="Acerto final por participante"
+                  />
+                </div>
+              </SectionCard>
+            </div>
+          </motion.div>
+        )}
+
+        {currentPage === "acesso" && (
           <motion.div key="tab-acesso" {...tabTransition}>
           <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
             <SectionCard
@@ -1103,7 +1347,7 @@ export function BolaoApp({
                       type="button"
                       onClick={() => {
                         setSelectedUserId(participant.id);
-                        setActiveTab("palpites");
+                        router.push("/palpites");
                       }}
                       className={`rounded-2xl border px-4 py-4 text-left transition ${
                         isActive
@@ -1207,7 +1451,7 @@ export function BolaoApp({
           </motion.div>
         )}
 
-        {activeTab === "palpites" && (
+        {currentPage === "palpites" && (
           <motion.div key="tab-palpites" {...tabTransition}>
           <SectionCard
             title="Dashboard"
@@ -1222,7 +1466,7 @@ export function BolaoApp({
                 <span>
                   {selectedParticipant
                     ? "Os palpites ficam abertos ate 1 minuto antes de cada jogo."
-                    : "Escolha um participante na aba de acesso para liberar a edicao."}
+                    : "Escolha um participante na pagina de acesso para liberar a edicao."}
                 </span>
               </div>
             </div>
@@ -1242,7 +1486,7 @@ export function BolaoApp({
                     <PredictionGameCard
                       key={game.id}
                       game={game}
-                      selectedUserId={selectedUserId}
+                      selectedUserId={effectiveSelectedUserId}
                       selectedParticipant={selectedParticipant}
                       predictions={state.predictions}
                       results={state.results}
@@ -1268,7 +1512,7 @@ export function BolaoApp({
                     <PredictionGameCard
                       key={game.id}
                       game={game}
-                      selectedUserId={selectedUserId}
+                      selectedUserId={effectiveSelectedUserId}
                       selectedParticipant={selectedParticipant}
                       predictions={state.predictions}
                       results={state.results}
@@ -1292,8 +1536,11 @@ export function BolaoApp({
                       !selectedParticipant || specialPickAvailability.status !== "open"
                     }
                     value={
-                      selectedUserId
-                        ? getSpecialPick(state.specialPicks, selectedUserId)?.champion ?? ""
+                      effectiveSelectedUserId
+                        ? getSpecialPick(
+                            state.specialPicks,
+                            effectiveSelectedUserId,
+                          )?.champion ?? ""
                         : ""
                     }
                     onChange={(event) =>
@@ -1318,8 +1565,11 @@ export function BolaoApp({
                       !selectedParticipant || specialPickAvailability.status !== "open"
                     }
                     value={
-                      selectedUserId
-                        ? getSpecialPick(state.specialPicks, selectedUserId)?.topScorer ?? ""
+                      effectiveSelectedUserId
+                        ? getSpecialPick(
+                            state.specialPicks,
+                            effectiveSelectedUserId,
+                          )?.topScorer ?? ""
                         : ""
                     }
                     onChange={(event) =>
@@ -1338,7 +1588,7 @@ export function BolaoApp({
           </motion.div>
         )}
 
-        {activeTab === "ranking" && (
+        {currentPage === "ranking" && (
           <motion.div key="tab-ranking" {...tabTransition}>
           <div className="space-y-6">
             <SectionCard
@@ -1382,7 +1632,7 @@ export function BolaoApp({
                 </div>
               </div>
 
-              <div className="mt-5 overflow-x-auto rounded-3xl border border-white/8 bg-black/20">
+              <div className="mt-5 min-w-0 max-w-full overflow-x-auto rounded-3xl border border-white/8 bg-black/20">
                 <table className="min-w-full text-left text-sm">
                   <thead className="bg-white/5 text-slate-300">
                     <tr>
@@ -1443,9 +1693,12 @@ export function BolaoApp({
               subtitle="Tabelas dinamicas com criterios FIFA: pontos, saldo e gols pro"
               icon={<Table2 className="h-6 w-6" />}
             >
-              <div className="grid gap-4 xl:grid-cols-2">
+              <div className="grid min-w-0 gap-4 xl:grid-cols-2">
                 {groupsData.map((group) => (
-                  <div key={group.id} className="space-y-3 rounded-3xl border border-white/8 bg-black/20 p-4">
+                  <div
+                    key={group.id}
+                    className="min-w-0 space-y-3 rounded-3xl border border-white/8 bg-black/20 p-4"
+                  >
                     <div className="flex items-center justify-between gap-3">
                       <h3 className="text-lg font-semibold text-white">{group.name}</h3>
                       <span className="rounded-full bg-white/5 px-3 py-1 text-xs text-slate-400">
@@ -1457,7 +1710,7 @@ export function BolaoApp({
                 ))}
               </div>
 
-              <div className="mt-6 rounded-3xl border border-white/8 bg-black/20 p-4">
+              <div className="mt-6 min-w-0 rounded-3xl border border-white/8 bg-black/20 p-4">
                 <h3 className="text-lg font-semibold text-white">
                   Ranking dos terceiros colocados
                 </h3>
@@ -1484,7 +1737,7 @@ export function BolaoApp({
               subtitle="16 avos de final em diante preenchidos automaticamente"
               icon={<GitBranch className="h-6 w-6" />}
             >
-              <div className="grid gap-4 xl:grid-cols-4">
+              <div className="grid min-w-0 gap-4 xl:grid-cols-4">
                 {stageOrder
                   .filter((stage) => stage !== "group")
                   .map((stage) => {
@@ -1509,7 +1762,7 @@ export function BolaoApp({
           </motion.div>
         )}
 
-        {activeTab === "admin" && (
+        {currentPage === "admin" && (
           <motion.div key="tab-admin" {...tabTransition}>
           <div className="space-y-6">
             <SectionCard
@@ -1522,6 +1775,18 @@ export function BolaoApp({
                 chaveamento do mata-mata sao atualizados automaticamente.
               </div>
 
+              {adminResultFeedback && (
+                <div className="mt-4 rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4 text-sm text-emerald-100">
+                  {adminResultFeedback}
+                </div>
+              )}
+
+              {adminResultError && (
+                <div className="mt-4 rounded-2xl border border-rose-400/20 bg-rose-400/10 p-4 text-sm text-rose-100">
+                  {adminResultError}
+                </div>
+              )}
+
               <div className="mt-6 space-y-6">
                 {groupsData.map((group) => (
                   <DashboardAccordion
@@ -1533,8 +1798,8 @@ export function BolaoApp({
                     isOpen={openAdminSection === `admin-group-${group.id}`}
                     onToggle={() => toggleAdminSection(`admin-group-${group.id}`)}
                   >
-                    <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-                      <div className="grid gap-3">
+                    <div className="grid min-w-0 gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+                      <div className="grid min-w-0 gap-3">
                         {groupGamesMap[group.id].map((game) => {
                           const result = state.results.find((item) => item.gameId === game.id);
 
@@ -1599,6 +1864,53 @@ export function BolaoApp({
                                   className="rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-center text-lg font-semibold text-white outline-none transition focus:border-emerald-400/60"
                                 />
                               </div>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setConfirmingOfficialGameId(game.id);
+                                  setAdminResultError("");
+                                  setAdminResultFeedback("");
+                                }}
+                                disabled={
+                                  isSavingOfficialResult &&
+                                  savingOfficialGameId === game.id
+                                }
+                                className="mt-4 inline-flex w-full items-center justify-center rounded-2xl border border-emerald-400/25 bg-emerald-400/10 px-4 py-3 text-sm font-medium text-emerald-100 transition hover:bg-emerald-400/15 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {isSavingOfficialResult && savingOfficialGameId === game.id
+                                  ? "Salvando..."
+                                  : "Salvar resultado"}
+                              </button>
+
+                              {confirmingOfficialGameId === game.id && (
+                                <div className="mt-3 rounded-2xl border border-amber-400/20 bg-amber-400/10 p-4 text-sm text-amber-50">
+                                  <p className="font-medium text-white">
+                                    Confirmar salvamento deste resultado?
+                                  </p>
+                                  <p className="mt-1 text-amber-100/90">
+                                    Placar: {result?.homeScore ?? "-"} x{" "}
+                                    {result?.awayScore ?? "-"} ·{" "}
+                                    {result?.finished ? "Encerrado" : "Agendado"}
+                                  </p>
+                                  <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                                    <button
+                                      type="button"
+                                      onClick={() => persistOfficialResult(game.id)}
+                                      className="inline-flex flex-1 items-center justify-center rounded-2xl border border-emerald-400/25 bg-emerald-400/15 px-4 py-3 font-medium text-emerald-100 transition hover:bg-emerald-400/20"
+                                    >
+                                      Confirmar e salvar no banco
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setConfirmingOfficialGameId(null)}
+                                      className="inline-flex flex-1 items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-3 font-medium text-white transition hover:bg-white/10"
+                                    >
+                                      Cancelar
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           );
                         })}
@@ -1618,7 +1930,10 @@ export function BolaoApp({
             >
               <div className="space-y-6">
                 {Object.entries(knockoutByRound).map(([roundLabel, games]) => (
-                  <div key={roundLabel} className="space-y-4 rounded-3xl border border-white/8 bg-black/20 p-4">
+                  <div
+                    key={roundLabel}
+                    className="min-w-0 space-y-4 rounded-3xl border border-white/8 bg-black/20 p-4"
+                  >
                     <div className="flex items-center justify-between gap-3">
                       <div>
                         <h3 className="text-lg font-semibold text-white">{roundLabel}</h3>
@@ -1631,7 +1946,7 @@ export function BolaoApp({
                       </span>
                     </div>
 
-                    <div className="grid gap-3 md:grid-cols-2">
+                    <div className="grid min-w-0 gap-3 md:grid-cols-2">
                       {games.map((game) => {
                         const result = state.results.find((item) => item.gameId === game.id);
 
@@ -1693,6 +2008,52 @@ export function BolaoApp({
                                 className="rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-center text-lg font-semibold text-white outline-none transition focus:border-emerald-400/60"
                               />
                             </div>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setConfirmingOfficialGameId(game.id);
+                                setAdminResultError("");
+                                setAdminResultFeedback("");
+                              }}
+                              disabled={
+                                isSavingOfficialResult && savingOfficialGameId === game.id
+                              }
+                              className="mt-4 inline-flex w-full items-center justify-center rounded-2xl border border-emerald-400/25 bg-emerald-400/10 px-4 py-3 text-sm font-medium text-emerald-100 transition hover:bg-emerald-400/15 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {isSavingOfficialResult && savingOfficialGameId === game.id
+                                ? "Salvando..."
+                                : "Salvar resultado"}
+                            </button>
+
+                            {confirmingOfficialGameId === game.id && (
+                              <div className="mt-3 rounded-2xl border border-amber-400/20 bg-amber-400/10 p-4 text-sm text-amber-50">
+                                <p className="font-medium text-white">
+                                  Confirmar salvamento deste resultado?
+                                </p>
+                                <p className="mt-1 text-amber-100/90">
+                                  Placar: {result?.homeScore ?? "-"} x{" "}
+                                  {result?.awayScore ?? "-"} ·{" "}
+                                  {result?.finished ? "Encerrado" : "Agendado"}
+                                </p>
+                                <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                                  <button
+                                    type="button"
+                                    onClick={() => persistOfficialResult(game.id)}
+                                    className="inline-flex flex-1 items-center justify-center rounded-2xl border border-emerald-400/25 bg-emerald-400/15 px-4 py-3 font-medium text-emerald-100 transition hover:bg-emerald-400/20"
+                                  >
+                                    Confirmar e salvar no banco
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmingOfficialGameId(null)}
+                                    className="inline-flex flex-1 items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-3 font-medium text-white transition hover:bg-white/10"
+                                  >
+                                    Cancelar
+                                  </button>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         );
                       })}

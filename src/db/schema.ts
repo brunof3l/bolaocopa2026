@@ -1,5 +1,6 @@
 import { relations, sql } from "drizzle-orm";
 import {
+  boolean,
   integer,
   numeric,
   pgEnum,
@@ -56,6 +57,16 @@ export const matches = pgTable("matches", {
   status: matchStatusEnum("status").notNull().default("SCHEDULED"),
 });
 
+export const officialResults = pgTable("official_results", {
+  gameId: text("game_id").primaryKey(),
+  homeScore: integer("home_score"),
+  awayScore: integer("away_score"),
+  finished: boolean("finished").notNull().default(false),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
 export const guesses = pgTable(
   "guesses",
   {
@@ -107,5 +118,7 @@ export type DbUser = typeof users.$inferSelect;
 export type NewDbUser = typeof users.$inferInsert;
 export type DbMatch = typeof matches.$inferSelect;
 export type NewDbMatch = typeof matches.$inferInsert;
+export type DbOfficialResult = typeof officialResults.$inferSelect;
+export type NewDbOfficialResult = typeof officialResults.$inferInsert;
 export type DbGuess = typeof guesses.$inferSelect;
 export type NewDbGuess = typeof guesses.$inferInsert;
