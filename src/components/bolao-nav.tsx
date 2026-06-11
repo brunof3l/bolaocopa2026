@@ -41,8 +41,8 @@ export function BolaoNav() {
   const pathname = usePathname();
 
   return (
-    <nav className="glass-surface rounded-3xl p-3">
-      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+    <nav className="glass-surface rounded-2xl p-2 md:rounded-3xl md:p-3">
+      <div className="premium-scrollbar flex snap-x gap-2 overflow-x-auto pb-1 md:grid md:grid-cols-2 md:overflow-visible md:pb-0 xl:grid-cols-5">
         {navigationItems.map((item) => {
           const Icon = item.icon;
           const isActive = pathname === item.href;
@@ -51,7 +51,7 @@ export function BolaoNav() {
             <Link
               key={item.href}
               href={item.href}
-              className={`rounded-2xl border px-4 py-3 text-left transition active:scale-95 ${
+              className={`min-w-[9.5rem] snap-start rounded-2xl border px-4 py-3 text-left transition active:scale-95 md:min-w-0 ${
                 isActive
                   ? "border-emerald-300/40 bg-emerald-400/12 text-white shadow-[0_12px_30px_rgba(16,185,129,0.12)]"
                   : "border-white/8 bg-white/[0.03] text-slate-300 hover:scale-[1.02] hover:border-white/20 hover:bg-white/[0.06]"

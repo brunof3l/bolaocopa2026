@@ -283,17 +283,17 @@ function SectionCard({
   children: React.ReactNode;
 }) {
   return (
-    <section className="glass-surface rounded-3xl p-5 transition-transform duration-300 hover:scale-[1.01] md:p-6">
-      <div className="mb-5 flex items-start justify-between gap-4">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.24em] text-bolao-accent/80">
+    <section className="glass-surface rounded-2xl p-4 transition-transform duration-300 hover:scale-[1.01] md:rounded-3xl md:p-6">
+      <div className="mb-4 flex items-start justify-between gap-3 md:mb-5 md:gap-4">
+        <div className="min-w-0">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-bolao-accent/80 md:text-sm md:tracking-[0.24em]">
             {title}
           </p>
-          <h2 className="mt-2 text-xl font-semibold text-white md:text-2xl">
+          <h2 className="mt-2 text-lg font-semibold leading-tight text-white md:text-2xl">
             {subtitle}
           </h2>
         </div>
-        <div className="rounded-2xl border border-white/8 bg-bolao-surfaceElevated/80 p-3 text-emerald-300">
+        <div className="rounded-2xl border border-white/8 bg-bolao-surfaceElevated/80 p-2.5 text-emerald-300 md:p-3">
           {icon}
         </div>
       </div>
@@ -312,9 +312,9 @@ function StatCard({
   helper: string;
 }) {
   return (
-    <div className="glass-surface rounded-2xl p-4 transition-transform duration-300 hover:scale-[1.02]">
-      <p className="text-sm text-bolao-muted">{label}</p>
-      <p className="mt-2 text-2xl font-semibold text-white">{value}</p>
+    <div className="glass-surface rounded-2xl p-3 transition-transform duration-300 hover:scale-[1.02] md:p-4">
+      <p className="text-xs text-bolao-muted md:text-sm">{label}</p>
+      <p className="mt-2 text-xl font-semibold text-white md:text-2xl">{value}</p>
       <p className="mt-1 text-xs text-slate-500">{helper}</p>
     </div>
   );
@@ -345,44 +345,76 @@ function StandingsTable({
   standings: StandingEntry[];
 }) {
   return (
-    <div className="glass-surface premium-scrollbar min-w-0 max-w-full overflow-x-auto rounded-3xl">
-      <table className="min-w-full text-left text-sm">
-        <thead className="bg-white/5 text-slate-300">
-          <tr>
-            <th className="px-3 py-3">Pos</th>
-            <th className="px-3 py-3">Selecao</th>
-            <th className="px-3 py-3">PTS</th>
-            <th className="px-3 py-3">J</th>
-            <th className="px-3 py-3">V</th>
-            <th className="px-3 py-3">E</th>
-            <th className="px-3 py-3">D</th>
-            <th className="px-3 py-3">GP</th>
-            <th className="px-3 py-3">GC</th>
-            <th className="px-3 py-3">SG</th>
-          </tr>
-        </thead>
-        <tbody>
-          {standings.map((entry) => (
-            <tr key={entry.teamId} className="border-t border-white/8 text-slate-200">
-              <td className="px-3 py-3">{entry.position}</td>
-              <td className="px-3 py-3 font-medium text-white">
-                <span className="inline-flex items-center gap-2">
-                  <CountryFlag code={entry.team.code} name={entry.team.name} />
-                  {entry.team.shortName}
-                </span>
-              </td>
-              <td className="px-3 py-3">{entry.points}</td>
-              <td className="px-3 py-3">{entry.played}</td>
-              <td className="px-3 py-3">{entry.wins}</td>
-              <td className="px-3 py-3">{entry.draws}</td>
-              <td className="px-3 py-3">{entry.losses}</td>
-              <td className="px-3 py-3">{entry.goalsFor}</td>
-              <td className="px-3 py-3">{entry.goalsAgainst}</td>
-              <td className="px-3 py-3">{entry.goalDifference}</td>
+    <div className="min-w-0">
+      <div className="space-y-3 md:hidden">
+        {standings.map((entry) => (
+          <div
+            key={entry.teamId}
+            className="glass-surface rounded-2xl border border-white/8 p-3"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <span className="rounded-full bg-white/5 px-2.5 py-1 text-xs text-slate-300">
+                {entry.position}o
+              </span>
+              <span className="text-sm font-semibold text-emerald-200">
+                {entry.points} pts
+              </span>
+            </div>
+            <div className="mt-3 flex items-center gap-2 font-medium text-white">
+              <CountryFlag code={entry.team.code} name={entry.team.name} />
+              <span>{entry.team.name}</span>
+            </div>
+            <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-slate-300">
+              <div className="rounded-xl bg-white/5 px-2 py-2">J {entry.played}</div>
+              <div className="rounded-xl bg-white/5 px-2 py-2">V {entry.wins}</div>
+              <div className="rounded-xl bg-white/5 px-2 py-2">E {entry.draws}</div>
+              <div className="rounded-xl bg-white/5 px-2 py-2">D {entry.losses}</div>
+              <div className="rounded-xl bg-white/5 px-2 py-2">GP {entry.goalsFor}</div>
+              <div className="rounded-xl bg-white/5 px-2 py-2">SG {entry.goalDifference}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="glass-surface premium-scrollbar hidden min-w-0 max-w-full overflow-x-auto rounded-3xl md:block">
+        <table className="min-w-full text-left text-sm">
+          <thead className="bg-white/5 text-slate-300">
+            <tr>
+              <th className="px-3 py-3">Pos</th>
+              <th className="px-3 py-3">Selecao</th>
+              <th className="px-3 py-3">PTS</th>
+              <th className="px-3 py-3">J</th>
+              <th className="px-3 py-3">V</th>
+              <th className="px-3 py-3">E</th>
+              <th className="px-3 py-3">D</th>
+              <th className="px-3 py-3">GP</th>
+              <th className="px-3 py-3">GC</th>
+              <th className="px-3 py-3">SG</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {standings.map((entry) => (
+              <tr key={entry.teamId} className="border-t border-white/8 text-slate-200">
+                <td className="px-3 py-3">{entry.position}</td>
+                <td className="px-3 py-3 font-medium text-white">
+                  <span className="inline-flex items-center gap-2">
+                    <CountryFlag code={entry.team.code} name={entry.team.name} />
+                    {entry.team.shortName}
+                  </span>
+                </td>
+                <td className="px-3 py-3">{entry.points}</td>
+                <td className="px-3 py-3">{entry.played}</td>
+                <td className="px-3 py-3">{entry.wins}</td>
+                <td className="px-3 py-3">{entry.draws}</td>
+                <td className="px-3 py-3">{entry.losses}</td>
+                <td className="px-3 py-3">{entry.goalsFor}</td>
+                <td className="px-3 py-3">{entry.goalsAgainst}</td>
+                <td className="px-3 py-3">{entry.goalDifference}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -469,22 +501,22 @@ function PredictionGameCard({
     : 0;
 
   return (
-    <article className="glass-surface rounded-3xl p-4 transition-transform duration-300 hover:scale-[1.02]">
+    <article className="glass-surface rounded-2xl p-3 transition-transform duration-300 hover:scale-[1.02] md:rounded-3xl md:p-4">
       <div className="flex flex-col gap-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
+          <div className="min-w-0">
             <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
               Jogo {game.matchNumber}
               {game.matchdayLabel ? ` · ${game.matchdayLabel}` : ""}
             </p>
-            <div className="mt-2 flex items-center justify-center gap-3 text-center text-base font-semibold text-white md:justify-start">
+            <div className="mt-2 flex flex-col items-center gap-2 text-center text-sm font-semibold text-white sm:flex-row sm:justify-start sm:text-base">
               <TeamLabel team={game.homeTeam} fallback="A definir" />
               <span className="text-slate-500">x</span>
               <TeamLabel team={game.awayTeam} fallback="A definir" />
             </div>
           </div>
 
-          <div className="rounded-2xl border border-white/8 bg-bolao-surfaceElevated/70 px-4 py-3 text-sm text-slate-300">
+          <div className="w-full rounded-2xl border border-white/8 bg-bolao-surfaceElevated/70 px-4 py-3 text-sm text-slate-300 sm:w-auto">
             <div className="flex items-center gap-2">
               <CalendarDays className="h-4 w-4 text-emerald-300" />
               <span>{formatKickoff(game.kickoff)}</span>
@@ -493,7 +525,7 @@ function PredictionGameCard({
           </div>
         </div>
 
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_18rem]">
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
           <div className="rounded-2xl border border-white/8 bg-bolao-surfaceElevated/70 p-4">
             <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
               <div className="space-y-2 text-center">
@@ -517,7 +549,7 @@ function PredictionGameCard({
                   onChange={(event) =>
                     onPredictionChange(game.id, "homeScore", event.target.value)
                   }
-                  className="w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-center text-xl font-semibold text-white outline-none transition focus:border-emerald-400/60 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="w-full rounded-2xl border border-white/10 bg-slate-950/80 px-3 py-3 text-center text-lg font-semibold text-white outline-none transition focus:border-emerald-400/60 disabled:cursor-not-allowed disabled:opacity-50 md:px-4 md:text-xl"
                 />
               </div>
 
@@ -544,7 +576,7 @@ function PredictionGameCard({
                   onChange={(event) =>
                     onPredictionChange(game.id, "awayScore", event.target.value)
                   }
-                  className="w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-center text-xl font-semibold text-white outline-none transition focus:border-emerald-400/60 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="w-full rounded-2xl border border-white/10 bg-slate-950/80 px-3 py-3 text-center text-lg font-semibold text-white outline-none transition focus:border-emerald-400/60 disabled:cursor-not-allowed disabled:opacity-50 md:px-4 md:text-xl"
                 />
               </div>
             </div>
@@ -624,7 +656,7 @@ function DashboardAccordion({
       <button
         type="button"
         onClick={onToggle}
-        className="flex w-full items-center justify-between gap-3 p-4 text-left transition hover:bg-white/[0.03] active:scale-[0.99] md:p-5"
+        className="flex w-full flex-col items-start gap-3 p-4 text-left transition hover:bg-white/[0.03] active:scale-[0.99] sm:flex-row sm:items-center sm:justify-between md:p-5"
       >
         <div className="min-w-0">
           <div className="flex items-center gap-3">
@@ -638,7 +670,7 @@ function DashboardAccordion({
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end sm:gap-3">
           {pendingCount > 0 && (
             <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs font-medium text-emerald-200">
               {pendingCount} {pendingCount === 1 ? "pendente" : "pendentes"}
@@ -1174,29 +1206,29 @@ export function BolaoApp({
 
   return (
     <main className="min-h-screen bg-bolao-bg text-slate-100">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 md:px-6 md:py-8">
-        <header className="glass-surface overflow-hidden rounded-[2rem] p-5 md:p-8">
-          <div className="grid gap-6 lg:grid-cols-[1.3fr_0.9fr]">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-3 py-4 sm:px-4 sm:py-5 md:gap-6 md:px-6 md:py-8">
+        <header className="glass-surface overflow-hidden rounded-[1.5rem] p-4 md:rounded-[2rem] md:p-8">
+          <div className="grid gap-4 md:gap-6 lg:grid-cols-[1.3fr_0.9fr]">
             <div>
-              <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.28em] text-emerald-200">
+              <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-emerald-200 md:mb-4 md:text-xs md:tracking-[0.28em]">
                 <Trophy className="h-4 w-4" />
                 Bolao Copa 2026
               </div>
-              <h1 className="max-w-3xl text-3xl font-semibold leading-tight text-white md:text-5xl">
+              <h1 className="max-w-3xl text-2xl font-semibold leading-tight text-white sm:text-3xl md:text-5xl">
                 Bolao da Copa com potes compartilhados, rollover e acerto final.
               </h1>
-              <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-300 md:text-base">
+              <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300 md:mt-4 md:text-base md:leading-7">
                 O sistema agora considera 48 selecoes, 12 grupos, classificacao
                 automatica, 8 melhores terceiros colocados, chaveamento do
                 mata-mata, potes pari-mutuel por criterio e trava de palpites ate
                 1 minuto antes do jogo.
               </p>
-              <div className="rounded-2xl border border-white/8 bg-bolao-surfaceElevated/70 px-4 py-3 text-sm text-slate-300">
+              <div className="mt-3 rounded-2xl border border-white/8 bg-bolao-surfaceElevated/70 px-4 py-3 text-xs text-slate-300 sm:text-sm">
                 Agora: <span className="font-semibold text-white">{formatFullDateTime(now.toISOString())}</span>
               </div>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid grid-cols-2 gap-3">
               <StatCard
                 label="Participantes"
                 value={String(participantList.length)}
@@ -1223,8 +1255,8 @@ export function BolaoApp({
 
         <BolaoNav />
 
-        <section className="glass-surface rounded-3xl p-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
+        <section className="glass-surface rounded-2xl p-4 md:rounded-3xl">
+          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
             <div className="flex items-center gap-3">
               <div className="rounded-2xl border border-white/8 bg-white/5 p-3 text-emerald-300">
                 {currentPageInfo.icon}
@@ -1235,7 +1267,7 @@ export function BolaoApp({
               </div>
             </div>
 
-            <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm text-slate-300">
+            <div className="w-full rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm text-slate-300 sm:w-auto">
               {selectedParticipant
                 ? `Usuario ativo: ${selectedParticipant.name}`
                 : "Nenhum usuario selecionado"}
@@ -1255,7 +1287,7 @@ export function BolaoApp({
                 <div className="grid gap-3 sm:grid-cols-2">
                   <Link
                     href="/acesso"
-                    className="rounded-2xl border border-white/8 bg-black/20 p-4 transition hover:border-white/20 hover:bg-white/5"
+                    className="rounded-2xl border border-white/8 bg-black/20 p-3.5 transition hover:border-white/20 hover:bg-white/5 md:p-4"
                   >
                     <p className="font-semibold text-white">Acesso</p>
                     <p className="mt-1 text-sm text-slate-400">
@@ -1264,7 +1296,7 @@ export function BolaoApp({
                   </Link>
                   <Link
                     href="/palpites"
-                    className="rounded-2xl border border-white/8 bg-black/20 p-4 transition hover:border-white/20 hover:bg-white/5"
+                    className="rounded-2xl border border-white/8 bg-black/20 p-3.5 transition hover:border-white/20 hover:bg-white/5 md:p-4"
                   >
                     <p className="font-semibold text-white">Palpites</p>
                     <p className="mt-1 text-sm text-slate-400">
@@ -1273,7 +1305,7 @@ export function BolaoApp({
                   </Link>
                   <Link
                     href="/ranking"
-                    className="rounded-2xl border border-white/8 bg-black/20 p-4 transition hover:border-white/20 hover:bg-white/5"
+                    className="rounded-2xl border border-white/8 bg-black/20 p-3.5 transition hover:border-white/20 hover:bg-white/5 md:p-4"
                   >
                     <p className="font-semibold text-white">Ranking</p>
                     <p className="mt-1 text-sm text-slate-400">
@@ -1282,7 +1314,7 @@ export function BolaoApp({
                   </Link>
                   <Link
                     href="/admin"
-                    className="rounded-2xl border border-white/8 bg-black/20 p-4 transition hover:border-white/20 hover:bg-white/5"
+                    className="rounded-2xl border border-white/8 bg-black/20 p-3.5 transition hover:border-white/20 hover:bg-white/5 md:p-4"
                   >
                     <p className="font-semibold text-white">Admin</p>
                     <p className="mt-1 text-sm text-slate-400">
@@ -1632,7 +1664,85 @@ export function BolaoApp({
                 </div>
               </div>
 
-              <div className="mt-5 min-w-0 max-w-full overflow-x-auto rounded-3xl border border-white/8 bg-black/20">
+              <div className="mt-5 space-y-3 md:hidden">
+                {ranking.map((entry, index) => (
+                  <div
+                    key={entry.userId}
+                    className="rounded-2xl border border-white/8 bg-black/20 p-4"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.14em] text-slate-500">
+                          {index + 1}o lugar
+                        </p>
+                        <p className="mt-1 font-semibold text-white">{entry.name}</p>
+                      </div>
+                      <span
+                        className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                          entry.netSettlement > 0
+                            ? "bg-emerald-400/10 text-emerald-200"
+                            : entry.netSettlement < 0
+                              ? "bg-rose-400/10 text-rose-200"
+                              : "bg-white/5 text-slate-300"
+                        }`}
+                      >
+                        {entry.settlementLabel}
+                      </span>
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-300">
+                      <div className="rounded-xl bg-white/5 p-3">
+                        <p className="text-slate-500">Ganhos</p>
+                        <p className="mt-1 font-semibold text-white">
+                          {formatCurrency(entry.grossWinnings)}
+                        </p>
+                      </div>
+                      <div className="rounded-xl bg-white/5 p-3">
+                        <p className="text-slate-500">Liquido</p>
+                        <p
+                          className={`mt-1 font-semibold ${
+                            entry.netSettlement > 0
+                              ? "text-emerald-300"
+                              : entry.netSettlement < 0
+                                ? "text-rose-300"
+                                : "text-white"
+                          }`}
+                        >
+                          {entry.netSettlement > 0 ? "+" : ""}
+                          {formatCurrency(entry.netSettlement)}
+                        </p>
+                      </div>
+                      <div className="rounded-xl bg-white/5 p-3">
+                        <p className="text-slate-500">Jogos</p>
+                        <p className="mt-1 font-semibold text-white">
+                          {formatCurrency(entry.matchWinnings)}
+                        </p>
+                      </div>
+                      <div className="rounded-xl bg-white/5 p-3">
+                        <p className="text-slate-500">Premios</p>
+                        <p className="mt-1 font-semibold text-white">
+                          {formatCurrency(entry.finalAwardsWinnings)}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-300">
+                      <span className="rounded-full bg-white/5 px-3 py-1">
+                        Cravos: {entry.exactHits}
+                      </span>
+                      <span className="rounded-full bg-white/5 px-3 py-1">
+                        Resultados: {entry.resultHits}
+                      </span>
+                      <span className="rounded-full bg-white/5 px-3 py-1">
+                        Campeao: {entry.championHit ? "Sim" : "Nao"}
+                      </span>
+                      <span className="rounded-full bg-white/5 px-3 py-1">
+                        Artilheiro: {entry.topScorerHit ? "Sim" : "Nao"}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-5 hidden min-w-0 max-w-full overflow-x-auto rounded-3xl border border-white/8 bg-black/20 md:block">
                 <table className="min-w-full text-left text-sm">
                   <thead className="bg-white/5 text-slate-300">
                     <tr>
@@ -1699,7 +1809,7 @@ export function BolaoApp({
                     key={group.id}
                     className="min-w-0 space-y-3 rounded-3xl border border-white/8 bg-black/20 p-4"
                   >
-                    <div className="flex items-center justify-between gap-3">
+                    <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between">
                       <h3 className="text-lg font-semibold text-white">{group.name}</h3>
                       <span className="rounded-full bg-white/5 px-3 py-1 text-xs text-slate-400">
                         3o lugar atual: {standingsByGroup[group.id][2]?.team.shortName ?? "-"}
@@ -1714,7 +1824,7 @@ export function BolaoApp({
                 <h3 className="text-lg font-semibold text-white">
                   Ranking dos terceiros colocados
                 </h3>
-                <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                   {bestThirds.map((entry) => (
                     <div key={entry.teamId} className="rounded-2xl border border-white/8 bg-white/5 p-3">
                       <p className="text-xs uppercase tracking-[0.14em] text-slate-500">
@@ -2199,7 +2309,7 @@ export function BolaoApp({
                   </div>
                 )}
 
-                <div className="flex gap-3">
+                <div className="flex flex-col gap-3 sm:flex-row">
                   <button
                     type="button"
                     onClick={closeCreateParticipantCard}

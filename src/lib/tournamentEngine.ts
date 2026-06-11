@@ -101,9 +101,8 @@ export function getPredictionHits(
     getMatchOutcome(prediction.homeScore, prediction.awayScore) ===
     getMatchOutcome(result.homeScore, result.awayScore);
   const goalsHit =
-    resultHit &&
-    (prediction.homeScore === result.homeScore ||
-      prediction.awayScore === result.awayScore);
+    prediction.homeScore + prediction.awayScore ===
+    result.homeScore + result.awayScore;
 
   return {
     resultHit,
