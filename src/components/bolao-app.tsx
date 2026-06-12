@@ -395,16 +395,15 @@ function RankingTable({
 }) {
   return (
     <div className="min-w-0 max-w-full overflow-x-auto rounded-3xl border border-white/8 bg-black/20">
-      <table className="min-w-[64rem] text-left text-[11px] sm:text-xs md:min-w-full md:text-sm">
+      <table className="min-w-[58rem] text-left text-[11px] sm:text-xs md:min-w-full md:text-sm">
         <thead className="bg-white/5 text-slate-300">
           <tr>
             <th className="px-2 py-2.5 font-medium sm:px-3 md:px-4 md:py-3">Pos.</th>
             <th className="px-2 py-2.5 font-medium sm:px-3 md:px-4 md:py-3">Participante</th>
-            <th className="px-2 py-2.5 font-medium sm:px-3 md:px-4 md:py-3">Ganhos</th>
+            <th className="px-2 py-2.5 font-medium sm:px-3 md:px-4 md:py-3">Ganhos por Jogos</th>
             <th className="px-2 py-2.5 font-medium sm:px-3 md:px-4 md:py-3">
               Acerto de Contas (Liquido)
             </th>
-            <th className="px-2 py-2.5 font-medium sm:px-3 md:px-4 md:py-3">Ganhos por Jogos</th>
             <th className="px-2 py-2.5 font-medium sm:px-3 md:px-4 md:py-3">Premios Finais</th>
             <th className="px-2 py-2.5 font-medium sm:px-3 md:px-4 md:py-3">Cravos</th>
             <th className="px-2 py-2.5 font-medium sm:px-3 md:px-4 md:py-3">
@@ -422,7 +421,7 @@ function RankingTable({
                 {entry.name}
               </td>
               <td className="px-2 py-2.5 font-semibold text-white sm:px-3 md:px-4 md:py-3">
-                {formatCurrency(entry.grossWinnings)}
+                {formatCurrency(entry.matchWinnings)}
               </td>
               <td className="px-2 py-2.5 sm:px-3 md:px-4 md:py-3">
                 <span
@@ -437,9 +436,6 @@ function RankingTable({
                   {entry.netSettlement > 0 ? "+" : ""}
                   {formatCurrency(entry.netSettlement)} · {entry.settlementLabel}
                 </span>
-              </td>
-              <td className="px-2 py-2.5 sm:px-3 md:px-4 md:py-3">
-                {formatCurrency(entry.matchWinnings)}
               </td>
               <td className="px-2 py-2.5 sm:px-3 md:px-4 md:py-3">
                 {formatCurrency(entry.finalAwardsWinnings)}
