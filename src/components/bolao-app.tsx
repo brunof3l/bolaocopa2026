@@ -1334,8 +1334,8 @@ export function BolaoApp({
           <motion.div key="page-menu" {...tabTransition}>
             <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
               <SectionCard
-                title="Menu"
-                subtitle="Escolha a area principal do bolao"
+                title="Menu Principal"
+                subtitle="Escolha a area que deseja acessar no bolao"
                 icon={<Trophy className="h-6 w-6" />}
               >
                 <div className="grid gap-3 sm:grid-cols-2">
