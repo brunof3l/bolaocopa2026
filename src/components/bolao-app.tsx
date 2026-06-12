@@ -6,7 +6,6 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   CalendarDays,
-  ChevronDown,
   Clock3,
   Crown,
   GitBranch,
@@ -56,7 +55,6 @@ import {
   getPredictionReward,
   getSpecialPickAvailability,
   getSpecialPick,
-  groupGamesByStage,
   scoringRules,
   upsertPrediction,
   upsertResult,
@@ -72,7 +70,6 @@ import {
 import type {
   AppUserRole,
   AppState,
-  GroupId,
   MatchPoolBreakdown,
   MatchResult,
   Participant,
@@ -947,75 +944,173 @@ function PredictionGameCard({
   );
 }
 
-function DashboardAccordion({
-  title,
-  subtitle,
-  games,
-  pendingCount,
-  isOpen,
-  onToggle,
-  children,
+function AdminResultGameCard({
+  game,
+  result,
+  onResultChange,
+  onResultFinished,
+  onSaveRequest,
+  onSaveConfirm,
+  isSaving,
+  isConfirming,
 }: {
-  title: string;
-  subtitle: string;
-  games: number;
-  pendingCount: number;
-  isOpen: boolean;
-  onToggle: () => void;
-  children: React.ReactNode;
+  game: ResolvedGame;
+  result: MatchResult | undefined;
+  onResultChange: (
+    gameId: string,
+    side: "homeScore" | "awayScore",
+    value: string,
+  ) => void;
+  onResultFinished: (gameId: string, finished: boolean) => void;
+  onSaveRequest: (gameId: string) => void;
+  onSaveConfirm: (gameId: string) => void;
+  isSaving: boolean;
+  isConfirming: boolean;
 }) {
   return (
-    <div className="glass-surface rounded-3xl transition-transform duration-300 hover:scale-[1.01]">
-      <button
-        type="button"
-        onClick={onToggle}
-        className="flex w-full flex-col items-start gap-3 p-4 text-left transition hover:bg-white/[0.03] active:scale-[0.99] sm:flex-row sm:items-center sm:justify-between md:p-5"
-      >
-        <div className="min-w-0">
-          <div className="flex items-center gap-3">
-            <h3 className="text-base font-semibold text-white md:text-lg">{title}</h3>
-            {!isOpen && pendingCount > 0 && (
-              <span className="inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.75)]" />
+    <article className="glass-surface rounded-2xl p-3 transition-transform duration-300 hover:scale-[1.02] md:rounded-3xl md:p-4">
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
+              Jogo {game.matchNumber}
+              {game.matchdayLabel ? ` Â· ${game.matchdayLabel}` : ""}
+            </p>
+            <div className="mt-2 flex flex-col items-center gap-2 text-center text-sm font-semibold text-white sm:flex-row sm:justify-start sm:text-base">
+              <TeamLabel team={game.homeTeam} fallback="A definir" />
+              <span className="text-slate-500">x</span>
+              <TeamLabel team={game.awayTeam} fallback="A definir" />
+            </div>
+          </div>
+
+          <div className="w-full rounded-2xl border border-white/8 bg-bolao-surfaceElevated/70 px-4 py-3 text-sm text-slate-300 sm:w-auto">
+            <div className="flex items-center gap-2">
+              <CalendarDays className="h-4 w-4 text-emerald-300" />
+              <span>{formatKickoff(game.kickoff)}</span>
+            </div>
+            <p className="mt-1 text-xs text-slate-500">{game.stadium}</p>
+          </div>
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
+          <div className="rounded-2xl border border-white/8 bg-bolao-surfaceElevated/70 p-4">
+            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+              <div className="space-y-2 text-center">
+                <p className="text-xs uppercase tracking-[0.16em] text-slate-400">
+                  {game.homeTeam?.shortName ?? "Time A"}
+                </p>
+                <div className="flex justify-center">
+                  <CountryFlag
+                    code={game.homeTeam?.code}
+                    name={game.homeTeam?.name ?? "Time A"}
+                    sizeClassName="h-10 w-10"
+                  />
+                </div>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  max={99}
+                  value={result?.homeScore ?? ""}
+                  onChange={(event) =>
+                    onResultChange(game.id, "homeScore", event.target.value)
+                  }
+                  className="w-full rounded-2xl border border-white/10 bg-slate-950/80 px-3 py-3 text-center text-lg font-semibold text-white outline-none transition focus:border-emerald-400/60 md:px-4 md:text-xl"
+                />
+              </div>
+
+              <span className="pt-7 text-xl font-semibold text-slate-500">x</span>
+
+              <div className="space-y-2 text-center">
+                <p className="text-xs uppercase tracking-[0.16em] text-slate-400">
+                  {game.awayTeam?.shortName ?? "Time B"}
+                </p>
+                <div className="flex justify-center">
+                  <CountryFlag
+                    code={game.awayTeam?.code}
+                    name={game.awayTeam?.name ?? "Time B"}
+                    sizeClassName="h-10 w-10"
+                  />
+                </div>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  max={99}
+                  value={result?.awayScore ?? ""}
+                  onChange={(event) =>
+                    onResultChange(game.id, "awayScore", event.target.value)
+                  }
+                  className="w-full rounded-2xl border border-white/10 bg-slate-950/80 px-3 py-3 text-center text-lg font-semibold text-white outline-none transition focus:border-emerald-400/60 md:px-4 md:text-xl"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-white/8 bg-bolao-surfaceElevated/70 p-4 text-sm text-slate-300">
+            <p className="font-semibold text-white">Resultado oficial</p>
+            <label className="mt-3 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-300">
+              <input
+                type="checkbox"
+                checked={result?.finished ?? false}
+                onChange={(event) => onResultFinished(game.id, event.target.checked)}
+              />
+              Encerrado
+            </label>
+            <p className="mt-3">
+              Status atual:{" "}
+              <span className="font-semibold text-white">
+                {result?.finished ? "encerrado" : "agendado"}
+              </span>
+            </p>
+            <p className="mt-2">
+              Placar salvo:{" "}
+              <span className="font-semibold text-white">
+                {result &&
+                result.homeScore !== null &&
+                result.awayScore !== null
+                  ? `${result.homeScore} x ${result.awayScore}`
+                  : "aguardando"}
+              </span>
+            </p>
+            <button
+              type="button"
+              onClick={() => onSaveRequest(game.id)}
+              disabled={isSaving}
+              className="mt-4 inline-flex w-full items-center justify-center rounded-2xl border border-emerald-400/25 bg-emerald-400/10 px-4 py-3 text-sm font-medium text-emerald-100 transition hover:bg-emerald-400/15 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isSaving ? "Salvando..." : "Salvar resultado"}
+            </button>
+
+            {isConfirming && (
+              <div className="mt-3 rounded-2xl border border-amber-400/20 bg-amber-400/10 p-4 text-sm text-amber-50">
+                <p className="font-medium text-white">Confirmar salvamento deste resultado?</p>
+                <p className="mt-1 text-amber-100/90">
+                  Placar: {result?.homeScore ?? "-"} x {result?.awayScore ?? "-"} Â·{" "}
+                  {result?.finished ? "Encerrado" : "Agendado"}
+                </p>
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                  <button
+                    type="button"
+                    onClick={() => onSaveConfirm(game.id)}
+                    className="inline-flex flex-1 items-center justify-center rounded-2xl border border-emerald-400/25 bg-emerald-400/15 px-4 py-3 font-medium text-emerald-100 transition hover:bg-emerald-400/20"
+                  >
+                    Confirmar e salvar no banco
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onSaveRequest("")}
+                    className="inline-flex flex-1 items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-3 font-medium text-white transition hover:bg-white/10"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
             )}
           </div>
-          <p className="mt-1 text-sm text-slate-400">
-            {games} {games === 1 ? "jogo" : "jogos"} Â· {subtitle}
-          </p>
         </div>
-
-        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end sm:gap-3">
-          {pendingCount > 0 && (
-            <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs font-medium text-emerald-200">
-              {pendingCount} {pendingCount === 1 ? "pendente" : "pendentes"}
-            </span>
-          )}
-          <span className="rounded-full border border-white/8 bg-white/5 px-3 py-1 text-xs text-slate-300">
-            {games}
-          </span>
-          <ChevronDown
-            className={`h-5 w-5 text-slate-400 transition-transform duration-300 ${
-              isOpen ? "rotate-180" : ""
-            }`}
-          />
-        </div>
-      </button>
-
-      <AnimatePresence initial={false}>
-        {isOpen && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.3, ease: "easeOut" }}
-            className="overflow-hidden"
-          >
-            <div className="border-t border-white/8 px-4 pb-4 pt-1 md:px-5 md:pb-5">
-              <div className="space-y-4 pt-4">{children}</div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
+      </div>
+    </article>
   );
 }
 
@@ -1116,9 +1211,6 @@ export function BolaoApp({
         return {};
       }
     },
-  );
-  const [openAdminSection, setOpenAdminSection] = useState<string | null>(
-    "admin-group-A",
   );
   const [isCreateParticipantOpen, setIsCreateParticipantOpen] = useState(false);
   const [newParticipantName, setNewParticipantName] = useState("");
@@ -1301,6 +1393,30 @@ export function BolaoApp({
         );
       }).length
     : 0;
+  const officialGamesByDate = useMemo(() => {
+    const groups = chronologicalGames.reduce<
+      Array<{ dayKey: string; label: string; games: ResolvedGame[] }>
+    >((accumulator, game) => {
+      const dayKey = getCalendarDayKey(game.kickoff);
+      const existingGroup = accumulator[accumulator.length - 1];
+
+      if (!existingGroup || existingGroup.dayKey !== dayKey) {
+        accumulator.push({
+          dayKey,
+          label: formatCalendarDate(game.kickoff),
+          games: [game],
+        });
+        return accumulator;
+      }
+
+      existingGroup.games.push(game);
+      return accumulator;
+    }, []);
+
+    return groups;
+  }, [chronologicalGames]);
+  const finishedOfficialResultsCount = state.results.filter((result) => result.finished).length;
+  const pendingOfficialResultsCount = chronologicalGames.length - finishedOfficialResultsCount;
   const firstTournamentKickoff = gamesData
     .slice()
     .sort(
@@ -1383,28 +1499,6 @@ export function BolaoApp({
       // Ignora indisponibilidade do storage para manter a tela funcional.
     }
   }, [verifiedPrivilegedAccess]);
-
-  const groupGamesMap = useMemo(
-    () =>
-      Object.fromEntries(
-        groupsData.map((group) => [
-          group.id,
-          groupResolvedGames.filter((game) => game.groupId === group.id),
-        ]),
-      ) as Record<GroupId, ResolvedGame[]>,
-    [groupResolvedGames],
-  );
-
-  const knockoutByRound = useMemo(
-    () => groupGamesByStage(knockout.games),
-    [knockout.games],
-  );
-
-  function toggleAdminSection(sectionId: string) {
-    setOpenAdminSection((currentSection) =>
-      currentSection === sectionId ? null : sectionId,
-    );
-  }
 
   const roleDrafts = useMemo(
     () =>
@@ -2706,9 +2800,41 @@ export function BolaoApp({
 
                 <SectionCard
                   title="Administracao"
-                  subtitle="Resultados oficiais da fase de grupos"
+                  subtitle="Lista ordenada pela data de cada jogo"
                   icon={<ShieldCheck className="h-6 w-6" />}
                 >
+                  <div className="mb-6 grid gap-3 lg:grid-cols-3">
+                    <div className="rounded-2xl border border-white/8 bg-black/20 p-4 text-sm text-slate-300">
+                      <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
+                        Perfil
+                      </p>
+                      <p className="mt-2 text-lg font-semibold text-white">
+                        {currentUserRole === "moderator" ? "Moderador" : "Admin"}
+                      </p>
+                      <p className="mt-1">
+                        Atualize os resultados oficiais em ordem cronologica.
+                      </p>
+                    </div>
+                    <div className="rounded-2xl border border-white/8 bg-black/20 p-4 text-sm text-slate-300">
+                      <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
+                        Encerrados
+                      </p>
+                      <p className="mt-2 text-lg font-semibold text-white">
+                        {finishedOfficialResultsCount}
+                      </p>
+                      <p className="mt-1">Jogos marcados como encerrados no painel.</p>
+                    </div>
+                    <div className="rounded-2xl border border-white/8 bg-black/20 p-4 text-sm text-slate-300">
+                      <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
+                        Pendentes
+                      </p>
+                      <p className="mt-2 text-lg font-semibold text-white">
+                        {pendingOfficialResultsCount}
+                      </p>
+                      <p className="mt-1">Partidas ainda sem resultado oficial encerrado.</p>
+                    </div>
+                  </div>
+
                   <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4 text-sm text-emerald-100/90">
                     {currentUserRole === "moderator"
                       ? "Voce esta como moderador e pode atualizar resultados oficiais."
@@ -2728,271 +2854,33 @@ export function BolaoApp({
                   )}
 
                   <div className="mt-6 space-y-6">
-                    {groupsData.map((group) => (
-                      <DashboardAccordion
-                        key={group.id}
-                        title={group.name}
-                        subtitle="Resultados oficiais e tabela do grupo"
-                        games={groupGamesMap[group.id].length}
-                        pendingCount={0}
-                        isOpen={openAdminSection === `admin-group-${group.id}`}
-                        onToggle={() => toggleAdminSection(`admin-group-${group.id}`)}
-                      >
-                        <div className="grid min-w-0 gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-                          <div className="grid min-w-0 gap-3">
-                            {groupGamesMap[group.id].map((game) => {
-                              const result = state.results.find((item) => item.gameId === game.id);
-
-                              return (
-                                <div
-                                  key={game.id}
-                                  className="rounded-3xl border border-white/8 bg-slate-950/30 p-4"
-                                >
-                                  <div className="flex flex-wrap items-start justify-between gap-3">
-                                    <div>
-                                      <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
-                                        Jogo {game.matchNumber} Â· {game.matchdayLabel}
-                                      </p>
-                                      <p className="mt-1 font-semibold text-white">
-                                        {game.homeTeam?.name} x {game.awayTeam?.name}
-                                      </p>
-                                    </div>
-                                    <label className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-300">
-                                      <input
-                                        type="checkbox"
-                                        checked={result?.finished ?? false}
-                                        onChange={(event) =>
-                                          handleResultFinished(game.id, event.target.checked)
-                                        }
-                                      />
-                                      Encerrado
-                                    </label>
-                                  </div>
-
-                                  <div className="mt-4 grid grid-cols-[1fr_auto_1fr] gap-3">
-                                    <input
-                                      type="number"
-                                      inputMode="numeric"
-                                      min={0}
-                                      max={99}
-                                      value={result?.homeScore ?? ""}
-                                      onChange={(event) =>
-                                        handleResultChange(
-                                          game.id,
-                                          "homeScore",
-                                          event.target.value,
-                                        )
-                                      }
-                                      className="rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-center text-lg font-semibold text-white outline-none transition focus:border-emerald-400/60"
-                                    />
-                                    <div className="flex items-center justify-center text-xl text-slate-500">
-                                      x
-                                    </div>
-                                    <input
-                                      type="number"
-                                      inputMode="numeric"
-                                      min={0}
-                                      max={99}
-                                      value={result?.awayScore ?? ""}
-                                      onChange={(event) =>
-                                        handleResultChange(
-                                          game.id,
-                                          "awayScore",
-                                          event.target.value,
-                                        )
-                                      }
-                                      className="rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-center text-lg font-semibold text-white outline-none transition focus:border-emerald-400/60"
-                                    />
-                                  </div>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setConfirmingOfficialGameId(game.id);
-                                      setAdminResultError("");
-                                      setAdminResultFeedback("");
-                                    }}
-                                    disabled={isSavingOfficialResult && savingOfficialGameId === game.id}
-                                    className="mt-4 inline-flex w-full items-center justify-center rounded-2xl border border-emerald-400/25 bg-emerald-400/10 px-4 py-3 text-sm font-medium text-emerald-100 transition hover:bg-emerald-400/15 disabled:cursor-not-allowed disabled:opacity-60"
-                                  >
-                                    {isSavingOfficialResult && savingOfficialGameId === game.id
-                                      ? "Salvando..."
-                                      : "Salvar resultado"}
-                                  </button>
-
-                                  {confirmingOfficialGameId === game.id && (
-                                    <div className="mt-3 rounded-2xl border border-amber-400/20 bg-amber-400/10 p-4 text-sm text-amber-50">
-                                      <p className="font-medium text-white">
-                                        Confirmar salvamento deste resultado?
-                                      </p>
-                                      <p className="mt-1 text-amber-100/90">
-                                        Placar: {result?.homeScore ?? "-"} x{" "}
-                                        {result?.awayScore ?? "-"} Â·{" "}
-                                        {result?.finished ? "Encerrado" : "Agendado"}
-                                      </p>
-                                      <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                                        <button
-                                          type="button"
-                                          onClick={() => persistOfficialResult(game.id)}
-                                          className="inline-flex flex-1 items-center justify-center rounded-2xl border border-emerald-400/25 bg-emerald-400/15 px-4 py-3 font-medium text-emerald-100 transition hover:bg-emerald-400/20"
-                                        >
-                                          Confirmar e salvar no banco
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => setConfirmingOfficialGameId(null)}
-                                          className="inline-flex flex-1 items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-3 font-medium text-white transition hover:bg-white/10"
-                                        >
-                                          Cancelar
-                                        </button>
-                                      </div>
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
-
-                          <StandingsTable standings={standingsByGroup[group.id]} />
+                    {officialGamesByDate.map((group) => (
+                      <div key={group.dayKey} className="space-y-4">
+                        <div className="rounded-2xl border border-white/8 bg-white/5 px-4 py-3">
+                          <p className="text-sm font-semibold text-white">{group.label}</p>
+                          <p className="mt-1 text-xs text-slate-400">
+                            {group.games.length} {group.games.length === 1 ? "jogo" : "jogos"}
+                          </p>
                         </div>
-                      </DashboardAccordion>
-                    ))}
-                  </div>
-                </SectionCard>
-
-                <SectionCard
-                  title="Mata-mata"
-                  subtitle="Resultados oficiais do round of 32 ate a final"
-                  icon={<GitBranch className="h-6 w-6" />}
-                >
-                  <div className="space-y-6">
-                    {Object.entries(knockoutByRound).map(([roundLabel, games]) => (
-                      <div
-                        key={roundLabel}
-                        className="min-w-0 space-y-4 rounded-3xl border border-white/8 bg-black/20 p-4"
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <div>
-                            <h3 className="text-lg font-semibold text-white">{roundLabel}</h3>
-                            <p className="text-sm text-slate-400">
-                              Os confrontos aparecem automaticamente conforme a classificacao.
-                            </p>
-                          </div>
-                          <span className="rounded-full bg-white/5 px-3 py-1 text-xs text-slate-400">
-                            {games.length} jogos
-                          </span>
-                        </div>
-
-                        <div className="grid min-w-0 gap-3 md:grid-cols-2">
-                          {games.map((game) => {
-                            const result = state.results.find((item) => item.gameId === game.id);
-
-                            return (
-                              <div
-                                key={game.id}
-                                className="rounded-3xl border border-white/8 bg-slate-950/30 p-4"
-                              >
-                                <div className="flex flex-wrap items-start justify-between gap-3">
-                                  <div>
-                                    <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
-                                      Jogo {game.matchNumber}
-                                    </p>
-                                    <div className="mt-2 space-y-1 font-semibold text-white">
-                                      <div>
-                                        <TeamLabel team={game.homeTeam} fallback="A definir" />
-                                      </div>
-                                      <div>
-                                        <TeamLabel team={game.awayTeam} fallback="A definir" />
-                                      </div>
-                                    </div>
-                                  </div>
-                                  <label className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-300">
-                                    <input
-                                      type="checkbox"
-                                      checked={result?.finished ?? false}
-                                      onChange={(event) =>
-                                        handleResultFinished(game.id, event.target.checked)
-                                      }
-                                    />
-                                    Encerrado
-                                  </label>
-                                </div>
-
-                                <div className="mt-4 grid grid-cols-[1fr_auto_1fr] gap-3">
-                                  <input
-                                    type="number"
-                                    inputMode="numeric"
-                                    min={0}
-                                    max={99}
-                                    value={result?.homeScore ?? ""}
-                                    onChange={(event) =>
-                                      handleResultChange(game.id, "homeScore", event.target.value)
-                                    }
-                                    className="rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-center text-lg font-semibold text-white outline-none transition focus:border-emerald-400/60"
-                                  />
-                                  <div className="flex items-center justify-center text-xl text-slate-500">
-                                    x
-                                  </div>
-                                  <input
-                                    type="number"
-                                    inputMode="numeric"
-                                    min={0}
-                                    max={99}
-                                    value={result?.awayScore ?? ""}
-                                    onChange={(event) =>
-                                      handleResultChange(game.id, "awayScore", event.target.value)
-                                    }
-                                    className="rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-center text-lg font-semibold text-white outline-none transition focus:border-emerald-400/60"
-                                  />
-                                </div>
-
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setConfirmingOfficialGameId(game.id);
-                                    setAdminResultError("");
-                                    setAdminResultFeedback("");
-                                  }}
-                                  disabled={isSavingOfficialResult && savingOfficialGameId === game.id}
-                                  className="mt-4 inline-flex w-full items-center justify-center rounded-2xl border border-emerald-400/25 bg-emerald-400/10 px-4 py-3 text-sm font-medium text-emerald-100 transition hover:bg-emerald-400/15 disabled:cursor-not-allowed disabled:opacity-60"
-                                >
-                                  {isSavingOfficialResult && savingOfficialGameId === game.id
-                                    ? "Salvando..."
-                                    : "Salvar resultado"}
-                                </button>
-
-                                {confirmingOfficialGameId === game.id && (
-                                  <div className="mt-3 rounded-2xl border border-amber-400/20 bg-amber-400/10 p-4 text-sm text-amber-50">
-                                    <p className="font-medium text-white">
-                                      Confirmar salvamento deste resultado?
-                                    </p>
-                                    <p className="mt-1 text-amber-100/90">
-                                      Placar: {result?.homeScore ?? "-"} x{" "}
-                                      {result?.awayScore ?? "-"} Â·{" "}
-                                      {result?.finished ? "Encerrado" : "Agendado"}
-                                    </p>
-                                    <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                                      <button
-                                        type="button"
-                                        onClick={() => persistOfficialResult(game.id)}
-                                        className="inline-flex flex-1 items-center justify-center rounded-2xl border border-emerald-400/25 bg-emerald-400/15 px-4 py-3 font-medium text-emerald-100 transition hover:bg-emerald-400/20"
-                                      >
-                                        Confirmar e salvar no banco
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => setConfirmingOfficialGameId(null)}
-                                        className="inline-flex flex-1 items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-3 font-medium text-white transition hover:bg-white/10"
-                                      >
-                                        Cancelar
-                                      </button>
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
+                        {group.games.map((game) => (
+                          <AdminResultGameCard
+                            key={game.id}
+                            game={game}
+                            result={state.results.find((item) => item.gameId === game.id)}
+                            onResultChange={handleResultChange}
+                            onResultFinished={handleResultFinished}
+                            onSaveRequest={(gameId) => {
+                              setConfirmingOfficialGameId(gameId || null);
+                              setAdminResultError("");
+                              setAdminResultFeedback("");
+                            }}
+                            onSaveConfirm={persistOfficialResult}
+                            isSaving={
+                              isSavingOfficialResult && savingOfficialGameId === game.id
+                            }
+                            isConfirming={confirmingOfficialGameId === game.id}
+                          />
+                        ))}
                       </div>
                     ))}
                   </div>
