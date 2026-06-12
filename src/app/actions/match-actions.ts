@@ -66,8 +66,11 @@ type VerifyPrivilegedAccessInput = {
 
 const db = getDb();
 const guessCloseWindowMs = 60 * 1000;
-const DEFAULT_ADMIN_ACCESS_PASSWORD = "Bruno@2026";
-const DEFAULT_MODERATOR_ACCESS_PASSWORD = "Moderador@2026";
+const DEFAULT_ADMIN_ACCESS_PASSWORDS = ["BrunoPainel@2026!", "Bruno@2026"];
+const DEFAULT_MODERATOR_ACCESS_PASSWORDS = [
+  "ModeradorPainel@2026!",
+  "Moderador@2026",
+];
 
 function normalizeScore(value: number) {
   if (!Number.isFinite(value) || value < 0) {
@@ -97,14 +100,16 @@ function roundCurrency(value: number) {
   return Number(value.toFixed(2));
 }
 
-function getPrivilegedAccessPassword(role: "admin" | "moderator") {
+function getPrivilegedAccessPasswords(role: "admin" | "moderator") {
   if (role === "admin") {
-    return process.env.ADMIN_ACCESS_PASSWORD?.trim() || DEFAULT_ADMIN_ACCESS_PASSWORD;
+    const configuredPassword = process.env.ADMIN_ACCESS_PASSWORD?.trim();
+
+    return configuredPassword ? [configuredPassword] : DEFAULT_ADMIN_ACCESS_PASSWORDS;
   }
 
-  return (
-    process.env.MODERATOR_ACCESS_PASSWORD?.trim() || DEFAULT_MODERATOR_ACCESS_PASSWORD
-  );
+  const configuredPassword = process.env.MODERATOR_ACCESS_PASSWORD?.trim();
+
+  return configuredPassword ? [configuredPassword] : DEFAULT_MODERATOR_ACCESS_PASSWORDS;
 }
 
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -621,17 +626,24 @@ export async function verifyPrivilegedAccessAction(
   const password = input.password.trim();
 
   if (!password) {
-    throw new Error("Informe a senha para acessar este perfil.");
+    return {
+      ok: false,
+      error: "Informe a senha para acessar este perfil.",
+    };
   }
 
-  const expectedPassword = getPrivilegedAccessPassword(input.role);
+  const acceptedPasswords = getPrivilegedAccessPasswords(input.role);
 
-  if (password !== expectedPassword) {
-    throw new Error("Senha incorreta para este perfil.");
+  if (!acceptedPasswords.includes(password)) {
+    return {
+      ok: false,
+      error: "Senha incorreta para este perfil.",
+    };
   }
 
   return {
     ok: true,
+    error: "",
   };
 }
 

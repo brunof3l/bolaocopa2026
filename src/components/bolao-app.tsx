@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -508,7 +508,7 @@ function DashboardGameRow({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
-            {game.roundLabel} · Jogo {game.matchNumber}
+            {game.roundLabel} Â· Jogo {game.matchNumber}
           </p>
           <div className="mt-2 flex flex-col gap-2 text-sm font-semibold text-white sm:flex-row sm:items-center">
             <TeamLabel team={game.homeTeam} fallback="A definir" />
@@ -646,7 +646,7 @@ function RankingTable({
                   }`}
                 >
                   {entry.netSettlement > 0 ? "+" : ""}
-                  {formatCurrency(entry.netSettlement)} · {entry.settlementLabel}
+                  {formatCurrency(entry.netSettlement)} Â· {entry.settlementLabel}
                 </span>
               </td>
               <td className="px-2 py-2.5 sm:px-3 md:px-4 md:py-3">
@@ -773,7 +773,7 @@ function PredictionGameCard({
           <div className="min-w-0">
             <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
               Jogo {game.matchNumber}
-              {game.matchdayLabel ? ` · ${game.matchdayLabel}` : ""}
+              {game.matchdayLabel ? ` Â· ${game.matchdayLabel}` : ""}
             </p>
             <div className="mt-2 flex flex-col items-center gap-2 text-center text-sm font-semibold text-white sm:flex-row sm:justify-start sm:text-base">
               <TeamLabel team={game.homeTeam} fallback="A definir" />
@@ -979,7 +979,7 @@ function DashboardAccordion({
             )}
           </div>
           <p className="mt-1 text-sm text-slate-400">
-            {games} {games === 1 ? "jogo" : "jogos"} · {subtitle}
+            {games} {games === 1 ? "jogo" : "jogos"} Â· {subtitle}
           </p>
         </div>
 
@@ -1814,10 +1814,15 @@ export function BolaoApp({
 
     startVerifyingPrivilegedAccess(async () => {
       try {
-        await verifyPrivilegedAccessAction({
+        const response = await verifyPrivilegedAccessAction({
           role: privilegedRole,
           password: privilegedPassword,
         });
+
+        if (!response.ok) {
+          setPrivilegedAccessError(response.error);
+          return;
+        }
 
         setVerifiedPrivilegedAccess((currentAccess) => ({
           ...currentAccess,
@@ -1830,7 +1835,7 @@ export function BolaoApp({
       } catch (error) {
         setPrivilegedAccessError(
           error instanceof Error
-            ? error.message
+            ? "Nao foi possivel validar a senha agora. Tente novamente."
             : "Nao foi possivel validar a senha deste perfil.",
         );
       }
@@ -2632,10 +2637,10 @@ export function BolaoApp({
                             #{entry.thirdPlaceRank} terceiro
                           </p>
                           <p className="mt-2 font-semibold text-white">
-                            {entry.groupId} · {entry.team.shortName}
+                            {entry.groupId} Â· {entry.team.shortName}
                           </p>
                           <p className="mt-1 text-sm text-slate-400">
-                            {entry.points} pts · SG {entry.goalDifference} · GP {entry.goalsFor}
+                            {entry.points} pts Â· SG {entry.goalDifference} Â· GP {entry.goalsFor}
                           </p>
                         </div>
                       ))}
@@ -2740,7 +2745,7 @@ export function BolaoApp({
                                   <div className="flex flex-wrap items-start justify-between gap-3">
                                     <div>
                                       <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
-                                        Jogo {game.matchNumber} · {game.matchdayLabel}
+                                        Jogo {game.matchNumber} Â· {game.matchdayLabel}
                                       </p>
                                       <p className="mt-1 font-semibold text-white">
                                         {game.homeTeam?.name} x {game.awayTeam?.name}
@@ -2816,7 +2821,7 @@ export function BolaoApp({
                                       </p>
                                       <p className="mt-1 text-amber-100/90">
                                         Placar: {result?.homeScore ?? "-"} x{" "}
-                                        {result?.awayScore ?? "-"} ·{" "}
+                                        {result?.awayScore ?? "-"} Â·{" "}
                                         {result?.finished ? "Encerrado" : "Agendado"}
                                       </p>
                                       <div className="mt-3 flex flex-col gap-2 sm:flex-row">
@@ -2957,7 +2962,7 @@ export function BolaoApp({
                                     </p>
                                     <p className="mt-1 text-amber-100/90">
                                       Placar: {result?.homeScore ?? "-"} x{" "}
-                                      {result?.awayScore ?? "-"} ·{" "}
+                                      {result?.awayScore ?? "-"} Â·{" "}
                                       {result?.finished ? "Encerrado" : "Agendado"}
                                     </p>
                                     <div className="mt-3 flex flex-col gap-2 sm:flex-row">
