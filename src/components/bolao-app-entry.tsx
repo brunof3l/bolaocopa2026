@@ -1,5 +1,11 @@
 import { BolaoApp } from "@/components/bolao-app";
-import { getAllUserNamesForApp, getOfficialResultsForApp } from "@/db/queries";
+import {
+  ensureAppSeedData,
+  getAllUsersForApp,
+  getAppPredictionsForApp,
+  getAppSpecialPicksForApp,
+  getOfficialResultsForApp,
+} from "@/db/queries";
 
 export type BolaoPageKey = "menu" | "acesso" | "palpites" | "ranking" | "admin";
 
@@ -8,16 +14,27 @@ export async function BolaoAppEntry({
 }: {
   currentPage: BolaoPageKey;
 }) {
-  const [initialRemoteUserNames, initialOfficialResults] = await Promise.all([
-    getAllUserNamesForApp(),
-    getOfficialResultsForApp(),
-  ]);
+  await ensureAppSeedData();
+
+  const [
+    initialRemoteUsers,
+    initialOfficialResults,
+    initialAppPredictions,
+    initialAppSpecialPicks,
+  ] = await Promise.all([
+      getAllUsersForApp(),
+      getOfficialResultsForApp(),
+      getAppPredictionsForApp(),
+      getAppSpecialPicksForApp(),
+    ]);
 
   return (
     <BolaoApp
       currentPage={currentPage}
-      initialRemoteUserNames={initialRemoteUserNames}
+      initialRemoteUsers={initialRemoteUsers}
       initialOfficialResults={initialOfficialResults}
+      initialAppPredictions={initialAppPredictions}
+      initialAppSpecialPicks={initialAppSpecialPicks}
     />
   );
 }

@@ -8,15 +8,15 @@ import type {
 } from "@/types/bolao";
 
 export const participants: Participant[] = [
-  { id: "bruno", name: "Bruno", accentColor: "#10b981" },
-  { id: "edivaldo", name: "Edivaldo", accentColor: "#0ea5e9" },
-  { id: "eduardo", name: "Eduardo", accentColor: "#a855f7" },
-  { id: "fernandinho", name: "Fernandinho", accentColor: "#f59e0b" },
-  { id: "gabriel", name: "Gabriel", accentColor: "#f43f5e" },
-  { id: "geovane", name: "Geovane", accentColor: "#3b82f6" },
-  { id: "gustavo", name: "Gustavo", accentColor: "#84cc16" },
-  { id: "sidnei", name: "Sidnei", accentColor: "#ef4444" },
-  { id: "sidnei-jr", name: "Sidnei Jr", accentColor: "#8b5cf6" },
+  { id: "bruno", name: "Bruno", accentColor: "#10b981", role: "admin" },
+  { id: "edivaldo", name: "Edivaldo", accentColor: "#0ea5e9", role: "user" },
+  { id: "eduardo", name: "Eduardo", accentColor: "#a855f7", role: "user" },
+  { id: "fernandinho", name: "Fernandinho", accentColor: "#f59e0b", role: "user" },
+  { id: "gabriel", name: "Gabriel", accentColor: "#f43f5e", role: "user" },
+  { id: "geovane", name: "Geovane", accentColor: "#3b82f6", role: "user" },
+  { id: "gustavo", name: "Gustavo", accentColor: "#84cc16", role: "user" },
+  { id: "sidnei", name: "Sidnei", accentColor: "#ef4444", role: "user" },
+  { id: "sidnei-jr", name: "Sidnei Jr", accentColor: "#8b5cf6", role: "user" },
 ];
 
 function team(

@@ -3,12 +3,13 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { LayoutGrid, LogIn, Medal, ShieldCheck, Swords } from "lucide-react";
+import type { AppUserRole } from "@/types/bolao";
 
 const navigationItems = [
   {
     href: "/",
-    label: "Menu",
-    description: "Visao geral",
+    label: "Dashboard",
+    description: "Proximos jogos",
     icon: LayoutGrid,
   },
   {
@@ -37,13 +38,34 @@ const navigationItems = [
   },
 ] as const;
 
-export function BolaoNav() {
+export function BolaoNav({
+  isLoggedIn,
+  currentUserRole,
+}: {
+  isLoggedIn: boolean;
+  currentUserRole: AppUserRole | null;
+}) {
   const pathname = usePathname();
+  const visibleNavigationItems = navigationItems.filter((item) => {
+    if (item.href === "/acesso") {
+      return true;
+    }
+
+    if (!isLoggedIn) {
+      return item.href === "/";
+    }
+
+    if (item.href === "/admin") {
+      return currentUserRole === "admin" || currentUserRole === "moderator";
+    }
+
+    return true;
+  });
 
   return (
     <nav className="glass-surface rounded-2xl p-2 md:rounded-3xl md:p-3">
       <div className="premium-scrollbar flex snap-x gap-2 overflow-x-auto pb-1 md:grid md:grid-cols-2 md:overflow-visible md:pb-0 xl:grid-cols-5">
-        {navigationItems.map((item) => {
+        {visibleNavigationItems.map((item) => {
           const Icon = item.icon;
           const isActive = pathname === item.href;
 

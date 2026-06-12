@@ -12,10 +12,12 @@ import {
 } from "drizzle-orm/pg-core";
 
 export const matchStatusEnum = pgEnum("match_status", ["SCHEDULED", "FINISHED"]);
+export const appUserRoleEnum = pgEnum("app_user_role", ["admin", "moderator", "user"]);
 
 export const users = pgTable("users", {
   id: uuid("id").defaultRandom().primaryKey(),
   name: text("name").notNull(),
+  role: appUserRoleEnum("role").notNull().default("user"),
   totalBalance: numeric("total_balance", {
     precision: 10,
     scale: 2,
@@ -66,6 +68,37 @@ export const officialResults = pgTable("official_results", {
     .notNull()
     .defaultNow(),
 });
+
+export const appGuesses = pgTable(
+  "app_guesses",
+  {
+    gameId: text("game_id").notNull(),
+    userId: text("user_id").notNull(),
+    homeScore: integer("home_score").notNull(),
+    awayScore: integer("away_score").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    appGuessPerUserGameIdx: uniqueIndex("app_guesses_user_game_uidx").on(
+      table.userId,
+      table.gameId,
+    ),
+  }),
+);
+
+export const appSpecialPicks = pgTable(
+  "app_special_picks",
+  {
+    userId: text("user_id").primaryKey(),
+    champion: text("champion").notNull().default(""),
+    topScorer: text("top_scorer").notNull().default(""),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+);
 
 export const guesses = pgTable(
   "guesses",
@@ -120,5 +153,9 @@ export type DbMatch = typeof matches.$inferSelect;
 export type NewDbMatch = typeof matches.$inferInsert;
 export type DbOfficialResult = typeof officialResults.$inferSelect;
 export type NewDbOfficialResult = typeof officialResults.$inferInsert;
+export type DbAppGuess = typeof appGuesses.$inferSelect;
+export type NewDbAppGuess = typeof appGuesses.$inferInsert;
+export type DbAppSpecialPick = typeof appSpecialPicks.$inferSelect;
+export type NewDbAppSpecialPick = typeof appSpecialPicks.$inferInsert;
 export type DbGuess = typeof guesses.$inferSelect;
 export type NewDbGuess = typeof guesses.$inferInsert;

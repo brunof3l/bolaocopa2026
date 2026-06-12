@@ -197,6 +197,23 @@ export function upsertResult(results: MatchResult[], nextResult: MatchResult) {
   );
 }
 
+export function upsertSpecialPick(
+  specialPicks: SpecialPick[],
+  nextSpecialPick: SpecialPick,
+) {
+  const existingIndex = specialPicks.findIndex(
+    (specialPick) => specialPick.userId === nextSpecialPick.userId,
+  );
+
+  if (existingIndex === -1) {
+    return [...specialPicks, nextSpecialPick];
+  }
+
+  return specialPicks.map((specialPick, index) =>
+    index === existingIndex ? nextSpecialPick : specialPick,
+  );
+}
+
 export function isGameReadyForPrediction(game: ResolvedGame) {
   return Boolean(game.homeTeam && game.awayTeam);
 }

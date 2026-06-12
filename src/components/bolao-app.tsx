@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   CalendarDays,
@@ -13,6 +13,7 @@ import {
   Goal,
   Lock,
   LogIn,
+  LogOut,
   Medal,
   Plus,
   RotateCcw,
@@ -26,8 +27,12 @@ import {
 } from "lucide-react";
 
 import {
+  saveAppGuessAction,
+  saveAppSpecialPickAction,
   saveOfficialAppResultAction,
   seedUsersIfMissingAction,
+  syncAppSpecialPicksAction,
+  updateUserRoleAction,
 } from "@/app/actions/match-actions";
 import { BolaoNav } from "@/components/bolao-nav";
 import { CountryFlag } from "@/components/country-flag";
@@ -54,6 +59,7 @@ import {
   scoringRules,
   upsertPrediction,
   upsertResult,
+  upsertSpecialPick,
 } from "@/lib/bolao";
 import {
   calculateAllStandings,
@@ -63,6 +69,7 @@ import {
   TOURNAMENT_INVESTMENT_TOTAL,
 } from "@/lib/tournamentEngine";
 import type {
+  AppUserRole,
   AppState,
   GroupId,
   MatchPoolBreakdown,
@@ -71,11 +78,13 @@ import type {
   Prediction,
   RankingEntry,
   ResolvedGame,
+  SpecialPick,
   StandingEntry,
   Team,
 } from "@/types/bolao";
 
 type AppPageKey = "menu" | "acesso" | "palpites" | "ranking" | "admin";
+type RemoteAppUser = { name: string; role: AppUserRole };
 const LOCAL_STORAGE_PARTICIPANTS_KEY = "bolao-copa-2026-participants";
 const LOCAL_STORAGE_STATE_KEY = "bolao-copa-2026-app-state";
 const LOCAL_STORAGE_SELECTED_USER_KEY = "bolao-copa-2026-selected-user";
@@ -106,8 +115,8 @@ const pageMeta: Record<
   { label: string; description: string; icon: React.ReactNode }
 > = {
   menu: {
-    label: "Menu",
-    description: "Atalhos principais do bolao",
+    label: "Dashboard",
+    description: "Proximos jogos e visao geral",
     icon: <Trophy className="h-4 w-4" />,
   },
   acesso: {
@@ -150,6 +159,33 @@ function normalizeParticipantName(value: string) {
   return value.trim().replace(/\s+/g, " ");
 }
 
+function getRoleLabel(role: AppUserRole) {
+  if (role === "admin") {
+    return "Admin";
+  }
+
+  if (role === "moderator") {
+    return "Moderador";
+  }
+
+  return "Usuario";
+}
+
+function formatCalendarDate(dateString: string) {
+  return new Intl.DateTimeFormat("pt-BR", {
+    weekday: "long",
+    day: "2-digit",
+    month: "2-digit",
+  }).format(new Date(dateString));
+}
+
+function getCalendarDayKey(dateString: string) {
+  const date = new Date(dateString);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
+    date.getDate(),
+  ).padStart(2, "0")}`;
+}
+
 function createParticipantId(name: string, existingParticipants: Participant[]) {
   const baseId =
     normalizeParticipantName(name)
@@ -170,14 +206,28 @@ function createParticipantId(name: string, existingParticipants: Participant[]) 
   return candidateId;
 }
 
+function resolveParticipantRole(
+  name: string,
+  remoteRole: AppUserRole | null | undefined = null,
+): AppUserRole {
+  if (normalizeParticipantName(name).toLowerCase() === "bruno") {
+    return "admin";
+  }
+
+  return remoteRole ?? "user";
+}
+
 function mergeParticipants(
   existingParticipants: Participant[],
-  incomingNames: string[],
+  incomingUsers: RemoteAppUser[],
 ) {
-  const mergedParticipants = [...existingParticipants];
+  const mergedParticipants = existingParticipants.map((participant) => ({
+    ...participant,
+    role: resolveParticipantRole(participant.name, participant.role),
+  }));
 
-  for (const rawName of incomingNames) {
-    const normalizedName = normalizeParticipantName(rawName);
+  for (const incomingUser of incomingUsers) {
+    const normalizedName = normalizeParticipantName(incomingUser.name);
 
     if (!normalizedName) {
       continue;
@@ -191,12 +241,26 @@ function mergeParticipants(
     );
 
     if (alreadyExists) {
+      const existingIndex = mergedParticipants.findIndex(
+        (participant) =>
+          participant.name.localeCompare(normalizedName, "pt-BR", {
+            sensitivity: "accent",
+          }) === 0,
+      );
+
+      if (existingIndex >= 0) {
+        mergedParticipants[existingIndex] = {
+          ...mergedParticipants[existingIndex],
+          role: resolveParticipantRole(normalizedName, incomingUser.role),
+        };
+      }
       continue;
     }
 
     mergedParticipants.push({
       id: createParticipantId(normalizedName, mergedParticipants),
       name: normalizedName,
+      role: resolveParticipantRole(normalizedName, incomingUser.role),
       accentColor:
         participantAccentPalette[
           mergedParticipants.length % participantAccentPalette.length
@@ -217,12 +281,68 @@ function mergeInitialResults(remoteResults: MatchResult[]) {
   );
 }
 
-function createInitialAppState(initialOfficialResults: MatchResult[]) {
+function mergeInitialPredictions(remotePredictions: Prediction[]) {
+  const remotePredictionsMap = new Map(
+    remotePredictions.map((prediction) => [
+      `${prediction.userId}:${prediction.gameId}`,
+      prediction,
+    ] as const),
+  );
+  const mergedPredictions = initialState.predictions.map(
+    (prediction) =>
+      remotePredictionsMap.get(`${prediction.userId}:${prediction.gameId}`) ?? prediction,
+  );
+
+  for (const prediction of remotePredictions) {
+    const key = `${prediction.userId}:${prediction.gameId}`;
+    const alreadyExists = mergedPredictions.some(
+      (existingPrediction) =>
+        `${existingPrediction.userId}:${existingPrediction.gameId}` === key,
+    );
+
+    if (!alreadyExists) {
+      mergedPredictions.push(prediction);
+    }
+  }
+
+  return mergedPredictions;
+}
+
+function mergeInitialSpecialPicks(remoteSpecialPicks: SpecialPick[]) {
+  const remoteSpecialPicksMap = new Map(
+    remoteSpecialPicks.map((specialPick) => [specialPick.userId, specialPick] as const),
+  );
+  const mergedSpecialPicks = initialState.specialPicks.map(
+    (specialPick) => remoteSpecialPicksMap.get(specialPick.userId) ?? specialPick,
+  );
+
+  for (const specialPick of remoteSpecialPicks) {
+    const alreadyExists = mergedSpecialPicks.some(
+      (existingSpecialPick) => existingSpecialPick.userId === specialPick.userId,
+    );
+
+    if (!alreadyExists) {
+      mergedSpecialPicks.push(specialPick);
+    }
+  }
+
+  return mergedSpecialPicks;
+}
+
+function createInitialAppState(
+  initialOfficialResults: MatchResult[],
+  initialAppPredictions: Prediction[],
+  initialAppSpecialPicks: SpecialPick[],
+) {
   const initialResults = mergeInitialResults(initialOfficialResults);
+  const initialPredictions = mergeInitialPredictions(initialAppPredictions);
+  const initialSpecialPicks = mergeInitialSpecialPicks(initialAppSpecialPicks);
 
   if (typeof window === "undefined") {
     return {
       ...initialState,
+      predictions: initialPredictions,
+      specialPicks: initialSpecialPicks,
       results: initialResults,
     };
   }
@@ -233,6 +353,8 @@ function createInitialAppState(initialOfficialResults: MatchResult[]) {
     if (!rawState) {
       return {
         ...initialState,
+        predictions: initialPredictions,
+        specialPicks: initialSpecialPicks,
         results: initialResults,
       };
     }
@@ -240,12 +362,10 @@ function createInitialAppState(initialOfficialResults: MatchResult[]) {
     const parsedState = JSON.parse(rawState) as Partial<AppState>;
 
     return {
-      predictions: Array.isArray(parsedState.predictions)
-        ? parsedState.predictions
-        : initialState.predictions,
+      predictions: initialPredictions,
       specialPicks: Array.isArray(parsedState.specialPicks)
-        ? parsedState.specialPicks
-        : initialState.specialPicks,
+        ? mergeInitialSpecialPicks(parsedState.specialPicks as SpecialPick[])
+        : initialSpecialPicks,
       results: initialResults,
       awards:
         parsedState.awards &&
@@ -267,6 +387,8 @@ function createInitialAppState(initialOfficialResults: MatchResult[]) {
   } catch {
     return {
       ...initialState,
+      predictions: initialPredictions,
+      specialPicks: initialSpecialPicks,
       results: initialResults,
     };
   }
@@ -317,6 +439,90 @@ function StatCard({
       <p className="text-xs text-bolao-muted md:text-sm">{label}</p>
       <p className="mt-2 text-xl font-semibold text-white md:text-2xl">{value}</p>
       <p className="mt-1 text-xs text-slate-500">{helper}</p>
+    </div>
+  );
+}
+
+function RoleBadge({ role }: { role: AppUserRole }) {
+  const toneClassName =
+    role === "admin"
+      ? "border-amber-300/20 bg-amber-300/10 text-amber-100"
+      : role === "moderator"
+        ? "border-sky-300/20 bg-sky-300/10 text-sky-100"
+        : "border-white/10 bg-white/5 text-slate-200";
+
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium ${toneClassName}`}
+    >
+      {getRoleLabel(role)}
+    </span>
+  );
+}
+
+function AccessStateCard({
+  title,
+  description,
+  actionHref,
+  actionLabel,
+}: {
+  title: string;
+  description: string;
+  actionHref: string;
+  actionLabel: string;
+}) {
+  return (
+    <SectionCard
+      title="Acesso"
+      subtitle={title}
+      icon={<Lock className="h-6 w-6" />}
+    >
+      <div className="rounded-2xl border border-white/8 bg-black/20 p-4 text-sm text-slate-300">
+        {description}
+      </div>
+      <Link
+        href={actionHref}
+        className="mt-4 inline-flex w-full items-center justify-center rounded-2xl border border-emerald-400/25 bg-emerald-400/10 px-4 py-3 font-medium text-emerald-100 transition hover:bg-emerald-400/15"
+      >
+        {actionLabel}
+      </Link>
+    </SectionCard>
+  );
+}
+
+function DashboardGameRow({
+  game,
+  result,
+}: {
+  game: ResolvedGame;
+  result: MatchResult | undefined;
+}) {
+  return (
+    <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
+            {game.roundLabel} · Jogo {game.matchNumber}
+          </p>
+          <div className="mt-2 flex flex-col gap-2 text-sm font-semibold text-white sm:flex-row sm:items-center">
+            <TeamLabel team={game.homeTeam} fallback="A definir" />
+            <span className="text-slate-500">x</span>
+            <TeamLabel team={game.awayTeam} fallback="A definir" />
+          </div>
+        </div>
+        <div className="rounded-2xl border border-white/8 bg-white/5 px-4 py-3 text-sm text-slate-300">
+          <p>{formatKickoff(game.kickoff)}</p>
+          <p className="mt-1 text-xs text-slate-500">{game.stadium}</p>
+        </div>
+      </div>
+      {result?.finished && result.homeScore !== null && result.awayScore !== null && (
+        <p className="mt-3 text-sm text-emerald-200">
+          Ultimo resultado:{" "}
+          <span className="font-semibold text-white">
+            {result.homeScore} x {result.awayScore}
+          </span>
+        </p>
+      )}
     </div>
   );
 }
@@ -512,6 +718,12 @@ function PredictionGameCard({
   breakdown,
   now,
   onPredictionChange,
+  onSaveRequest,
+  onSaveConfirm,
+  isSaving,
+  isConfirming,
+  feedbackMessage,
+  errorMessage,
 }: {
   game: ResolvedGame;
   selectedUserId: string | null;
@@ -525,6 +737,12 @@ function PredictionGameCard({
     side: "homeScore" | "awayScore",
     value: string,
   ) => void;
+  onSaveRequest: (gameId: string) => void;
+  onSaveConfirm: (gameId: string) => void;
+  isSaving: boolean;
+  isConfirming: boolean;
+  feedbackMessage: string;
+  errorMessage: string;
 }) {
   const prediction = selectedUserId
     ? getPrediction(predictions, selectedUserId, game.id)
@@ -533,6 +751,11 @@ function PredictionGameCard({
   const reward = getPredictionReward(prediction, result, breakdown);
   const availability = getPredictionAvailability(game, now);
   const isEditable = Boolean(selectedParticipant) && availability.status === "open";
+  const canSavePrediction =
+    Boolean(selectedParticipant) &&
+    availability.status === "open" &&
+    prediction?.homeScore !== null &&
+    prediction?.awayScore !== null;
   const totalGamePot = breakdown
     ? breakdown.totalPot.result + breakdown.totalPot.goals + breakdown.totalPot.exact
     : 0;
@@ -664,6 +887,53 @@ function PredictionGameCard({
             <p className="mt-2 text-xs text-slate-400">
               Pote atual: {formatCurrency(totalGamePot)}
             </p>
+            <button
+              type="button"
+              onClick={() => onSaveRequest(game.id)}
+              disabled={!canSavePrediction || isSaving}
+              className="mt-4 inline-flex w-full items-center justify-center rounded-2xl border border-emerald-400/25 bg-emerald-400/10 px-4 py-3 text-sm font-medium text-emerald-100 transition hover:bg-emerald-400/15 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isSaving ? "Salvando..." : "Salvar palpite"}
+            </button>
+
+            {isConfirming && (
+              <div className="mt-3 rounded-2xl border border-amber-400/20 bg-amber-400/10 p-4 text-sm text-amber-50">
+                <p className="font-medium text-white">
+                  Confirmar salvamento deste palpite?
+                </p>
+                <p className="mt-1 text-amber-100/90">
+                  Palpite: {prediction?.homeScore ?? "-"} x {prediction?.awayScore ?? "-"}
+                </p>
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                  <button
+                    type="button"
+                    onClick={() => onSaveConfirm(game.id)}
+                    className="inline-flex flex-1 items-center justify-center rounded-2xl border border-emerald-400/25 bg-emerald-400/15 px-4 py-3 font-medium text-emerald-100 transition hover:bg-emerald-400/20"
+                  >
+                    Confirmar e salvar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onSaveRequest("")}
+                    className="inline-flex flex-1 items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-3 font-medium text-white transition hover:bg-white/10"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {feedbackMessage && (
+              <div className="mt-3 rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-3 text-xs text-emerald-100">
+                {feedbackMessage}
+              </div>
+            )}
+
+            {errorMessage && (
+              <div className="mt-3 rounded-2xl border border-rose-400/20 bg-rose-400/10 p-3 text-xs text-rose-100">
+                {errorMessage}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -745,16 +1015,20 @@ function DashboardAccordion({
 
 export function BolaoApp({
   currentPage,
-  initialRemoteUserNames = [],
+  initialRemoteUsers = [],
   initialOfficialResults = [],
+  initialAppPredictions = [],
+  initialAppSpecialPicks = [],
 }: {
   currentPage: AppPageKey;
-  initialRemoteUserNames?: string[];
+  initialRemoteUsers?: RemoteAppUser[];
   initialOfficialResults?: MatchResult[];
+  initialAppPredictions?: Prediction[];
+  initialAppSpecialPicks?: SpecialPick[];
 }) {
   const router = useRouter();
   const [participantList, setParticipantList] = useState<Participant[]>(() => {
-    const baseParticipants = mergeParticipants(participants, initialRemoteUserNames);
+    const baseParticipants = mergeParticipants(participants, initialRemoteUsers);
 
     if (typeof window === "undefined") {
       return baseParticipants;
@@ -783,7 +1057,13 @@ export function BolaoApp({
           typeof participant.accentColor === "string" &&
           !accumulator.some((existing) => existing.id === participant.id)
         ) {
-          accumulator.push(participant);
+          accumulator.push({
+            ...participant,
+            role: resolveParticipantRole(
+              participant.name,
+              "role" in participant ? participant.role : null,
+            ),
+          });
         }
 
         return accumulator;
@@ -793,7 +1073,11 @@ export function BolaoApp({
     }
   });
   const [state, setState] = useState<AppState>(() =>
-    createInitialAppState(initialOfficialResults),
+    createInitialAppState(
+      initialOfficialResults,
+      initialAppPredictions,
+      initialAppSpecialPicks,
+    ),
   );
   const [selectedUserId, setSelectedUserId] = useState<string | null>(() => {
     if (typeof window === "undefined") {
@@ -806,9 +1090,6 @@ export function BolaoApp({
       return null;
     }
   });
-  const [openDashboardSection, setOpenDashboardSection] = useState<string | null>(
-    "group-A",
-  );
   const [openAdminSection, setOpenAdminSection] = useState<string | null>(
     "admin-group-A",
   );
@@ -818,17 +1099,44 @@ export function BolaoApp({
   const [participantFormSuccess, setParticipantFormSuccess] = useState("");
   const [isSavingParticipant, startSavingParticipant] = useTransition();
   const [isSavingOfficialResult, startSavingOfficialResult] = useTransition();
+  const [isSavingPrediction, startSavingPrediction] = useTransition();
   const [savingOfficialGameId, setSavingOfficialGameId] = useState<string | null>(null);
   const [confirmingOfficialGameId, setConfirmingOfficialGameId] = useState<string | null>(
     null,
   );
+  const [savingPredictionGameId, setSavingPredictionGameId] = useState<string | null>(null);
+  const [confirmingPredictionGameId, setConfirmingPredictionGameId] = useState<string | null>(
+    null,
+  );
   const [adminResultFeedback, setAdminResultFeedback] = useState("");
   const [adminResultError, setAdminResultError] = useState("");
+  const [predictionFeedbackGameId, setPredictionFeedbackGameId] = useState<string | null>(
+    null,
+  );
+  const [predictionFeedback, setPredictionFeedback] = useState("");
+  const [predictionErrorGameId, setPredictionErrorGameId] = useState<string | null>(null);
+  const [predictionError, setPredictionError] = useState("");
+  const [isSavingSpecialPick, startSavingSpecialPick] = useTransition();
+  const [specialPickFeedback, setSpecialPickFeedback] = useState("");
+  const [specialPickError, setSpecialPickError] = useState("");
+  const [roleDraftOverrides, setRoleDraftOverrides] = useState<Record<string, AppUserRole>>(() =>
+    Object.fromEntries(participants.map((participant) => [participant.id, participant.role])),
+  );
+  const [isSavingUserRole, startSavingUserRole] = useTransition();
+  const [savingRoleUserId, setSavingRoleUserId] = useState<string | null>(null);
+  const [userRoleFeedback, setUserRoleFeedback] = useState("");
+  const [userRoleError, setUserRoleError] = useState("");
+  const didSyncInitialSpecialPicksRef = useRef(false);
 
   const now = new Date();
   const selectedParticipant =
     participantList.find((participant) => participant.id === selectedUserId) ?? null;
   const effectiveSelectedUserId = selectedParticipant?.id ?? null;
+  const isLoggedIn = Boolean(selectedParticipant);
+  const currentUserRole = selectedParticipant?.role ?? null;
+  const canAccessAdmin =
+    currentUserRole === "admin" || currentUserRole === "moderator";
+  const canManageUsers = currentUserRole === "admin";
 
   const standingsByGroup = useMemo(
     () => calculateAllStandings(groupsData, gamesData, state.results, teamsById),
@@ -861,6 +1169,15 @@ export function BolaoApp({
         (left, right) => left.matchNumber - right.matchNumber,
       ),
     [groupResolvedGames, knockout.games],
+  );
+  const chronologicalGames = useMemo(
+    () =>
+      [...allResolvedGames].sort(
+        (left, right) =>
+          new Date(left.kickoff).getTime() - new Date(right.kickoff).getTime() ||
+          left.matchNumber - right.matchNumber,
+      ),
+    [allResolvedGames],
   );
 
   const ranking = useMemo(
@@ -898,6 +1215,50 @@ export function BolaoApp({
       }
     );
   }, [allResolvedGames, financeSummary.matchBreakdowns]);
+  const upcomingGames = chronologicalGames
+    .filter((game) => new Date(game.kickoff).getTime() >= now.getTime())
+    .slice(0, 6);
+  const predictionGamesByDate = useMemo(() => {
+    const groups = chronologicalGames.reduce<
+      Array<{ dayKey: string; label: string; games: ResolvedGame[] }>
+    >((accumulator, game) => {
+      const dayKey = getCalendarDayKey(game.kickoff);
+      const existingGroup = accumulator[accumulator.length - 1];
+
+      if (!existingGroup || existingGroup.dayKey !== dayKey) {
+        accumulator.push({
+          dayKey,
+          label: formatCalendarDate(game.kickoff),
+          games: [game],
+        });
+        return accumulator;
+      }
+
+      existingGroup.games.push(game);
+      return accumulator;
+    }, []);
+
+    return groups;
+  }, [chronologicalGames]);
+  const openPredictionsCount = effectiveSelectedUserId
+    ? chronologicalGames.filter((game) => {
+        const availability = getPredictionAvailability(game, now);
+        return availability.status === "open";
+      }).length
+    : 0;
+  const pendingPredictionsCount = effectiveSelectedUserId
+    ? chronologicalGames.filter((game) => {
+        const availability = getPredictionAvailability(game, now);
+        const prediction = getPrediction(state.predictions, effectiveSelectedUserId, game.id);
+
+        return (
+          availability.status === "open" &&
+          (!prediction ||
+            prediction.homeScore === null ||
+            prediction.awayScore === null)
+        );
+      }).length
+    : 0;
   const firstTournamentKickoff = gamesData
     .slice()
     .sort(
@@ -929,6 +1290,30 @@ export function BolaoApp({
   }, [state]);
 
   useEffect(() => {
+    if (didSyncInitialSpecialPicksRef.current) {
+      return;
+    }
+
+    didSyncInitialSpecialPicksRef.current = true;
+
+    const picksToSync = state.specialPicks.filter(
+      (pick) => pick.champion.trim() || pick.topScorer.trim(),
+    );
+
+    if (!picksToSync.length) {
+      return;
+    }
+
+    startSavingSpecialPick(async () => {
+      try {
+        await syncAppSpecialPicksAction(picksToSync);
+      } catch {
+        // Mantem os dados locais ativos mesmo se o sync inicial falhar.
+      }
+    });
+  }, [state.specialPicks, startSavingSpecialPick]);
+
+  useEffect(() => {
     try {
       if (selectedUserId) {
         window.localStorage.setItem(LOCAL_STORAGE_SELECTED_USER_KEY, selectedUserId);
@@ -956,58 +1341,22 @@ export function BolaoApp({
     [knockout.games],
   );
 
-  function toggleDashboardSection(sectionId: string) {
-    setOpenDashboardSection((currentSection) =>
-      currentSection === sectionId ? null : sectionId,
-    );
-  }
-
   function toggleAdminSection(sectionId: string) {
     setOpenAdminSection((currentSection) =>
       currentSection === sectionId ? null : sectionId,
     );
   }
 
-  function getPendingPredictionCount(games: ResolvedGame[]) {
-    if (!effectiveSelectedUserId) {
-      return 0;
-    }
-
-    return games.filter((game) => {
-      const availability = getPredictionAvailability(game, now);
-      const prediction = getPrediction(
-        state.predictions,
-        effectiveSelectedUserId,
-        game.id,
-      );
-
-      return (
-        availability.status === "open" &&
-        (!prediction ||
-          prediction.homeScore === null ||
-          prediction.awayScore === null)
-      );
-    }).length;
-  }
-
-  const firstPendingDashboardSection = (() => {
-    for (const group of groupsData) {
-      if (getPendingPredictionCount(groupGamesMap[group.id]) > 0) {
-        return `group-${group.id}`;
-      }
-    }
-
-    for (const [roundLabel, games] of Object.entries(knockoutByRound)) {
-      if (getPendingPredictionCount(games) > 0) {
-        return `knockout-${roundLabel}`;
-      }
-    }
-
-    return "group-A";
-  })();
-
-  const effectiveOpenDashboardSection =
-    openDashboardSection ?? firstPendingDashboardSection;
+  const roleDrafts = useMemo(
+    () =>
+      Object.fromEntries(
+        participantList.map((participant) => [
+          participant.id,
+          roleDraftOverrides[participant.id] ?? participant.role,
+        ]),
+      ) as Record<string, AppUserRole>,
+    [participantList, roleDraftOverrides],
+  );
 
   function handlePredictionChange(
     gameId: string,
@@ -1022,6 +1371,18 @@ export function BolaoApp({
 
     if (!game || getPredictionAvailability(game, now).status !== "open") {
       return;
+    }
+
+    if (confirmingPredictionGameId === gameId) {
+      setConfirmingPredictionGameId(null);
+    }
+    if (predictionFeedbackGameId === gameId) {
+      setPredictionFeedbackGameId(null);
+      setPredictionFeedback("");
+    }
+    if (predictionErrorGameId === gameId) {
+      setPredictionErrorGameId(null);
+      setPredictionError("");
     }
 
     setState((currentState) => {
@@ -1052,30 +1413,148 @@ export function BolaoApp({
     });
   }
 
+  function requestPredictionSave(gameId: string) {
+    setConfirmingPredictionGameId(gameId || null);
+    setPredictionFeedbackGameId(null);
+    setPredictionFeedback("");
+    setPredictionErrorGameId(null);
+    setPredictionError("");
+  }
+
+  function persistPrediction(gameId: string) {
+    if (!effectiveSelectedUserId) {
+      setPredictionErrorGameId(gameId);
+      setPredictionError("Selecione um participante antes de salvar o palpite.");
+      return;
+    }
+
+    const game = allResolvedGames.find((item) => item.id === gameId);
+    const prediction = getPrediction(state.predictions, effectiveSelectedUserId, gameId);
+
+    if (!game || getPredictionAvailability(game, now).status !== "open") {
+      setPredictionErrorGameId(gameId);
+      setPredictionError("A janela para salvar este palpite esta fechada.");
+      return;
+    }
+
+    if (prediction?.homeScore === null || prediction?.awayScore === null || !prediction) {
+      setPredictionErrorGameId(gameId);
+      setPredictionError("Informe os dois placares antes de salvar o palpite.");
+      return;
+    }
+
+    setSavingPredictionGameId(gameId);
+    setConfirmingPredictionGameId(null);
+    setPredictionFeedbackGameId(null);
+    setPredictionFeedback("");
+    setPredictionErrorGameId(null);
+    setPredictionError("");
+
+    startSavingPrediction(async () => {
+      try {
+        const response = await saveAppGuessAction({
+          userId: effectiveSelectedUserId,
+          gameId,
+          homeScore: prediction.homeScore,
+          awayScore: prediction.awayScore,
+        });
+
+        setState((currentState) => ({
+          ...currentState,
+          predictions: upsertPrediction(
+            currentState.predictions,
+            response.prediction,
+          ),
+        }));
+        setPredictionFeedbackGameId(gameId);
+        setPredictionFeedback(`Palpite do jogo ${game.matchNumber} salvo com sucesso.`);
+      } catch (error) {
+        setPredictionErrorGameId(gameId);
+        setPredictionError(
+          error instanceof Error ? error.message : "Nao foi possivel salvar o palpite.",
+        );
+      } finally {
+        setSavingPredictionGameId(null);
+      }
+    });
+  }
+
   function handleSpecialPickChange(field: "champion" | "topScorer", value: string) {
     if (!effectiveSelectedUserId || specialPickAvailability.status !== "open") {
       return;
     }
 
+    setSpecialPickFeedback("");
+    setSpecialPickError("");
+
     setState((currentState) => {
-      const nextSpecialPicks = currentState.specialPicks.map((pick) =>
-        pick.userId === effectiveSelectedUserId ? { ...pick, [field]: value } : pick,
+      const currentSpecialPick = getSpecialPick(
+        currentState.specialPicks,
+        effectiveSelectedUserId,
       );
+      const nextSpecialPick: SpecialPick = {
+        userId: effectiveSelectedUserId,
+        champion:
+          field === "champion" ? value : currentSpecialPick?.champion ?? "",
+        topScorer:
+          field === "topScorer" ? value : currentSpecialPick?.topScorer ?? "",
+        updatedAt: new Date().toISOString(),
+      };
 
       return {
         ...currentState,
-        specialPicks:
-          nextSpecialPicks.some((pick) => pick.userId === effectiveSelectedUserId)
-            ? nextSpecialPicks
-            : [
-                ...currentState.specialPicks,
-                {
-                  userId: effectiveSelectedUserId,
-                  champion: field === "champion" ? value : "",
-                  topScorer: field === "topScorer" ? value : "",
-                },
-              ],
+        specialPicks: upsertSpecialPick(currentState.specialPicks, nextSpecialPick),
       };
+    });
+  }
+
+  function persistSpecialPick() {
+    if (!effectiveSelectedUserId) {
+      setSpecialPickError("Selecione um participante antes de salvar os palpites especiais.");
+      setSpecialPickFeedback("");
+      return;
+    }
+
+    if (specialPickAvailability.status !== "open") {
+      setSpecialPickError("A janela para campeao e artilheiro ja foi encerrada.");
+      setSpecialPickFeedback("");
+      return;
+    }
+
+    const specialPick = getSpecialPick(state.specialPicks, effectiveSelectedUserId);
+
+    if (!specialPick) {
+      setSpecialPickError("Preencha campeao e artilheiro antes de salvar.");
+      setSpecialPickFeedback("");
+      return;
+    }
+
+    setSpecialPickFeedback("");
+    setSpecialPickError("");
+
+    startSavingSpecialPick(async () => {
+      try {
+        const response = await saveAppSpecialPickAction({
+          userId: effectiveSelectedUserId,
+          champion: specialPick.champion,
+          topScorer: specialPick.topScorer,
+        });
+
+        setState((currentState) => ({
+          ...currentState,
+          specialPicks: upsertSpecialPick(
+            currentState.specialPicks,
+            response.specialPick,
+          ),
+        }));
+        setSpecialPickFeedback("Campeao e artilheiro salvos no banco com sucesso.");
+      } catch (error) {
+        setSpecialPickError(
+          error instanceof Error
+            ? error.message
+            : "Nao foi possivel salvar campeao e artilheiro.",
+        );
+      }
     });
   }
 
@@ -1210,6 +1689,7 @@ export function BolaoApp({
     const nextParticipant: Participant = {
       id: createParticipantId(normalizedName, participantList),
       name: normalizedName,
+      role: resolveParticipantRole(normalizedName),
       accentColor:
         participantAccentPalette[participantList.length % participantAccentPalette.length],
     };
@@ -1235,12 +1715,95 @@ export function BolaoApp({
     }, 500);
   }
 
+  function handleLogin(participantId: string) {
+    setSelectedUserId(participantId);
+    setUserRoleError("");
+    setUserRoleFeedback("");
+    router.push("/");
+  }
+
+  function handleLogout() {
+    setSelectedUserId(null);
+    setConfirmingPredictionGameId(null);
+    setPredictionFeedbackGameId(null);
+    setPredictionFeedback("");
+    setPredictionErrorGameId(null);
+    setPredictionError("");
+    router.push("/acesso");
+  }
+
+  function handleUserRoleDraftChange(participantId: string, role: AppUserRole) {
+    setRoleDraftOverrides((currentDrafts) => ({
+      ...currentDrafts,
+      [participantId]: role,
+    }));
+    setUserRoleError("");
+    setUserRoleFeedback("");
+  }
+
+  function persistUserRole(participantId: string) {
+    const participant = participantList.find((item) => item.id === participantId);
+
+    if (!participant) {
+      setUserRoleError("Usuario nao encontrado para atualizar o acesso.");
+      setUserRoleFeedback("");
+      return;
+    }
+
+    const nextRole =
+      participant.name.trim().toLowerCase() === "bruno"
+        ? "admin"
+        : (roleDrafts[participantId] ?? participant.role);
+
+    setSavingRoleUserId(participantId);
+    setUserRoleError("");
+    setUserRoleFeedback("");
+
+    startSavingUserRole(async () => {
+      try {
+        const response = await updateUserRoleAction({
+          name: participant.name,
+          role: nextRole,
+        });
+
+        setParticipantList((currentParticipants) =>
+          currentParticipants.map((currentParticipant) =>
+            currentParticipant.id === participantId
+              ? {
+                  ...currentParticipant,
+                  role: resolveParticipantRole(
+                    currentParticipant.name,
+                    response.user.role,
+                  ),
+                }
+              : currentParticipant,
+          ),
+        );
+        setRoleDraftOverrides((currentDrafts) => ({
+          ...currentDrafts,
+          [participantId]: resolveParticipantRole(participant.name, response.user.role),
+        }));
+        setUserRoleFeedback(`${participant.name} agora esta como ${getRoleLabel(nextRole)}.`);
+      } catch (error) {
+        setUserRoleError(
+          error instanceof Error
+            ? error.message
+            : "Nao foi possivel atualizar o papel do usuario.",
+        );
+      } finally {
+        setSavingRoleUserId(null);
+      }
+    });
+  }
+
   function resetDemoData() {
     setState({
       ...initialState,
+      predictions: mergeInitialPredictions(initialAppPredictions),
+      specialPicks: mergeInitialSpecialPicks(initialAppSpecialPicks),
       results: mergeInitialResults(initialOfficialResults),
     });
-    setParticipantList(mergeParticipants(participants, initialRemoteUserNames));
+    setParticipantList(mergeParticipants(participants, initialRemoteUsers));
     setSelectedUserId(null);
     setIsCreateParticipantOpen(false);
     setParticipantFormError("");
@@ -1256,1031 +1819,1218 @@ export function BolaoApp({
     router.push("/");
   }
 
+  const requiresAuthenticatedPage =
+    currentPage === "palpites" ||
+    currentPage === "ranking" ||
+    currentPage === "admin";
+  const isAdminPageBlocked = currentPage === "admin" && isLoggedIn && !canAccessAdmin;
+  const selectedSpecialPick = effectiveSelectedUserId
+    ? getSpecialPick(state.specialPicks, effectiveSelectedUserId)
+    : undefined;
+
   return (
     <main className="min-h-screen bg-bolao-bg text-slate-100">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-3 py-4 sm:px-4 sm:py-5 md:gap-6 md:px-6 md:py-8">
-        {currentPage === "menu" && (
-          <header className="glass-surface overflow-hidden rounded-[1.5rem] p-4 md:rounded-[2rem] md:p-8">
-            <div className="grid gap-4 md:gap-6 lg:grid-cols-[1.3fr_0.9fr]">
-              <div>
-                <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-emerald-200 md:mb-4 md:text-xs md:tracking-[0.28em]">
-                  <Trophy className="h-4 w-4" />
-                  Bolao Copa 2026
-                </div>
-                <h1 className="max-w-3xl text-2xl font-semibold leading-tight text-white sm:text-3xl md:text-5xl">
-                  Bolao da Copa com potes compartilhados, rollover e acerto final.
-                </h1>
-                <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300 md:mt-4 md:text-base md:leading-7">
-                  O sistema agora considera 48 selecoes, 12 grupos, classificacao
-                  automatica, 8 melhores terceiros colocados, chaveamento do
-                  mata-mata, potes pari-mutuel por criterio e trava de palpites ate
-                  1 minuto antes do jogo.
-                </p>
-                <div className="mt-3 rounded-2xl border border-white/8 bg-bolao-surfaceElevated/70 px-4 py-3 text-xs text-slate-300 sm:text-sm">
-                  Agora: <span className="font-semibold text-white">{formatFullDateTime(now.toISOString())}</span>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <StatCard
-                  label="Participantes"
-                  value={String(participantList.length)}
-                  helper="Grupo fechado para o bolao"
-                />
-                <StatCard
-                  label="Jogos cadastrados"
-                  value={String(gamesData.length)}
-                  helper="72 de grupos + 32 de mata-mata"
-                />
-                <StatCard
-                  label="Palpites salvos"
-                  value={String(predictionsCount)}
-                  helper="Base inicial pronta para testes"
-                />
-                <StatCard
-                  label="Jogos finalizados"
-                  value={String(finishedGamesCount)}
-                  helper="Resultados oficiais inseridos pelo admin"
-                />
-              </div>
-            </div>
-          </header>
-        )}
-
-        <BolaoNav />
+        <BolaoNav
+          isLoggedIn={isLoggedIn}
+          currentUserRole={currentUserRole}
+        />
 
         <section className="glass-surface rounded-2xl p-4 md:rounded-3xl">
-          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-            <div className="flex items-center gap-3">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-start gap-3">
               <div className="rounded-2xl border border-white/8 bg-white/5 p-3 text-emerald-300">
                 {currentPageInfo.icon}
               </div>
               <div>
                 <p className="text-sm font-semibold text-white">{currentPageInfo.label}</p>
                 <p className="text-sm text-slate-400">{currentPageInfo.description}</p>
+                <p className="mt-2 text-xs text-slate-500">
+                  Atualizado em {formatFullDateTime(now.toISOString())}
+                </p>
               </div>
             </div>
 
-            <div className="w-full rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm text-slate-300 sm:w-auto">
-              {selectedParticipant
-                ? `Usuario ativo: ${selectedParticipant.name}`
-                : "Nenhum usuario selecionado"}
+            <div className="flex flex-col gap-3 lg:items-end">
+              <div className="flex flex-wrap items-center gap-2">
+                {selectedParticipant ? (
+                  <>
+                    <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-sm text-white">
+                      {selectedParticipant.name}
+                    </span>
+                    <RoleBadge role={selectedParticipant.role} />
+                  </>
+                ) : (
+                  <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-sm text-slate-300">
+                    Nenhum usuario logado
+                  </span>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => router.push("/acesso")}
+                  className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-white transition hover:bg-white/10"
+                >
+                  {isLoggedIn ? "Trocar usuario" : "Entrar"}
+                </button>
+                {isLoggedIn && (
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl border border-rose-400/20 bg-rose-400/10 px-4 py-2 text-sm font-medium text-rose-100 transition hover:bg-rose-400/15"
+                  >
+                    <LogOut className="h-4 w-4" />
+                    Sair
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </section>
 
         <AnimatePresence mode="wait">
-        {currentPage === "menu" && (
-          <motion.div key="page-menu" {...tabTransition}>
-            <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
-              <SectionCard
-                title="Menu Principal"
-                subtitle="Escolha a area que deseja acessar no bolao"
-                icon={<Trophy className="h-6 w-6" />}
-              >
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <Link
-                    href="/acesso"
-                    className="rounded-2xl border border-white/8 bg-black/20 p-3.5 transition hover:border-white/20 hover:bg-white/5 md:p-4"
-                  >
-                    <p className="font-semibold text-white">Acesso</p>
-                    <p className="mt-1 text-sm text-slate-400">
-                      Selecionar participante, cadastrar novo nome e revisar as regras.
-                    </p>
-                  </Link>
-                  <Link
-                    href="/palpites"
-                    className="rounded-2xl border border-white/8 bg-black/20 p-3.5 transition hover:border-white/20 hover:bg-white/5 md:p-4"
-                  >
-                    <p className="font-semibold text-white">Palpites</p>
-                    <p className="mt-1 text-sm text-slate-400">
-                      Preencher jogos, campeao e artilheiro com foco total no mobile.
-                    </p>
-                  </Link>
-                  <Link
-                    href="/ranking"
-                    className="rounded-2xl border border-white/8 bg-black/20 p-3.5 transition hover:border-white/20 hover:bg-white/5 md:p-4"
-                  >
-                    <p className="font-semibold text-white">Ranking</p>
-                    <p className="mt-1 text-sm text-slate-400">
-                      Ver ganhos, acerto de contas, grupos e chaveamento.
-                    </p>
-                  </Link>
-                  <Link
-                    href="/admin"
-                    className="rounded-2xl border border-white/8 bg-black/20 p-3.5 transition hover:border-white/20 hover:bg-white/5 md:p-4"
-                  >
-                    <p className="font-semibold text-white">Admin</p>
-                    <p className="mt-1 text-sm text-slate-400">
-                      Salvar resultados oficiais com confirmacao antes de gravar.
-                    </p>
-                  </Link>
-                </div>
-
-                <div className="mt-5 rounded-2xl border border-emerald-400/15 bg-emerald-400/5 p-4 text-sm text-emerald-100/90">
-                  Navegue por paginas dedicadas para reduzir o comprimento da tela no
-                  celular e deixar cada area mais direta.
-                </div>
-              </SectionCard>
-
-              <SectionCard
-                title="Resumo"
-                subtitle="Visao rapida do torneio e do estado atual"
-                icon={<CalendarDays className="h-6 w-6" />}
-              >
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <StatCard
-                    label="Participantes"
-                    value={String(participantList.length)}
-                    helper="Grupo atual do bolao"
-                  />
-                  <StatCard
-                    label="Jogos finalizados"
-                    value={String(finishedGamesCount)}
-                    helper="Resultados oficiais persistidos"
-                  />
-                  <StatCard
-                    label="Palpites preenchidos"
-                    value={String(predictionsCount)}
-                    helper="Mantidos na navegacao via storage"
-                  />
-                  <StatCard
-                    label="Investimento"
-                    value={formatCurrency(TOURNAMENT_INVESTMENT_TOTAL)}
-                    helper="Acerto final por participante"
-                  />
-                </div>
-              </SectionCard>
-            </div>
-          </motion.div>
-        )}
-
-        {currentPage === "acesso" && (
-          <motion.div key="tab-acesso" {...tabTransition}>
-          <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
-            <SectionCard
-              title="Acesso"
-              subtitle="Selecione o participante para entrar no dashboard"
-              icon={<UserCircle2 className="h-6 w-6" />}
-            >
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {participantList.map((participant) => {
-                  const isActive = participant.id === selectedUserId;
-
-                  return (
-                    <button
-                      key={participant.id}
-                      type="button"
-                      onClick={() => {
-                        setSelectedUserId(participant.id);
-                        router.push("/palpites");
-                      }}
-                      className={`rounded-2xl border px-4 py-4 text-left transition ${
-                        isActive
-                          ? "border-white/40 bg-white/10"
-                          : "border-white/8 bg-black/20 hover:border-white/20 hover:bg-white/5"
-                      }`}
-                      style={{
-                        boxShadow: isActive
-                          ? `0 0 0 1px ${participant.accentColor}, inset 0 0 25px rgba(255,255,255,0.03)`
-                          : undefined,
-                      }}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div
-                          className="flex h-11 w-11 items-center justify-center rounded-2xl text-sm font-bold text-white"
-                          style={{ backgroundColor: participant.accentColor }}
-                        >
-                          {participant.name.slice(0, 2).toUpperCase()}
-                        </div>
-                        <div>
-                          <p className="font-semibold text-white">{participant.name}</p>
-                          <p className="text-xs text-slate-400">
-                            {isActive ? "Usuario ativo" : "Entrar no sistema"}
-                          </p>
-                        </div>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="mt-5 rounded-2xl border border-white/8 bg-black/20 p-4 text-sm text-slate-300">
-                {selectedParticipant
-                  ? `Usuario ativo: ${selectedParticipant.name}. Os palpites ficam abertos ate 1 minuto antes de cada partida.`
-                  : "Selecione um participante para liberar a edicao dos palpites."}
-              </div>
-
-              <div className="mt-5">
-                <button
-                  type="button"
-                  onClick={openCreateParticipantCard}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-emerald-400/25 bg-emerald-400/10 px-4 py-3 font-medium text-emerald-100 transition hover:bg-emerald-400/15"
-                >
-                  <Plus className="h-4 w-4" />
-                  Adicionar participante
-                </button>
-              </div>
-            </SectionCard>
-
-            <SectionCard
-              title="Regras"
-              subtitle="Potes compartilhados, premios finais e janela de edicao"
-              icon={<ShieldCheck className="h-6 w-6" />}
-            >
-              <div className="grid gap-3">
-                {scoringRules.map((rule) => (
-                  <div
-                    key={rule.label}
-                    className="flex items-center justify-between rounded-2xl border border-white/8 bg-black/20 px-4 py-3"
-                  >
-                    <span className="text-sm text-slate-300">{rule.label}</span>
-                    <span className="rounded-full bg-emerald-400/10 px-3 py-1 text-sm font-semibold text-emerald-200">
-                      {formatCurrency(rule.value)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-
-              <div className="mt-4 rounded-2xl border border-amber-300/15 bg-amber-300/5 p-4 text-sm text-amber-100/90">
-                Cada jogo forma 3 potes: resultado, gols e placar exato. Se
-                ninguem acertar um criterio, o valor acumula para o proximo jogo.
-                Os palpites podem ser editados ate 1 minuto antes do apito
-                inicial.
-              </div>
-
-              <div className="mt-4 rounded-2xl border border-emerald-400/15 bg-emerald-400/5 p-4 text-sm text-emerald-100/90">
-                Investimento total por participante:{" "}
-                <span className="font-semibold text-white">
-                  {formatCurrency(TOURNAMENT_INVESTMENT_TOTAL)}
-                </span>
-                . O encontro de contas acontece no fim com a formula ganhos menos
-                investimento total.
-              </div>
-
-              <div className="mt-4 grid gap-3">
-                {awardRules.map((award) => (
-                  <div
-                    key={award.label}
-                    className="rounded-2xl border border-white/8 bg-black/20 px-4 py-3"
-                  >
-                    <p className="text-sm font-medium text-white">{award.label}</p>
-                    <p className="mt-1 text-xs text-slate-400">
-                      Pote final atual:{" "}
-                      {formatCurrency(participantList.length * award.prize)}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </SectionCard>
-          </div>
-          </motion.div>
-        )}
-
-        {currentPage === "palpites" && (
-          <motion.div key="tab-palpites" {...tabTransition}>
-          <SectionCard
-            title="Dashboard"
-            subtitle="Palpites dos grupos, 16 avos e fases seguintes"
-            icon={<Swords className="h-6 w-6" />}
-          >
-            <div className="mb-6 rounded-2xl border border-white/8 bg-black/20 p-4 text-sm text-slate-300">
-              <div className="flex flex-wrap items-center gap-3">
-                <span className="rounded-full bg-emerald-400/10 px-3 py-1 font-medium text-emerald-100">
-                  {selectedParticipant ? selectedParticipant.name : "Selecione um usuario"}
-                </span>
-                <span>
-                  {selectedParticipant
-                    ? "Os palpites ficam abertos ate 1 minuto antes de cada jogo."
-                    : "Escolha um participante na pagina de acesso para liberar a edicao."}
-                </span>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              {groupsData.map((group) => (
-                <DashboardAccordion
-                  key={group.id}
-                  title={group.name}
-                  subtitle="Jogos da fase de grupos"
-                  games={groupGamesMap[group.id].length}
-                  pendingCount={getPendingPredictionCount(groupGamesMap[group.id])}
-                  isOpen={effectiveOpenDashboardSection === `group-${group.id}`}
-                  onToggle={() => toggleDashboardSection(`group-${group.id}`)}
-                >
-                  {groupGamesMap[group.id].map((game) => (
-                    <PredictionGameCard
-                      key={game.id}
-                      game={game}
-                      selectedUserId={effectiveSelectedUserId}
-                      selectedParticipant={selectedParticipant}
-                      predictions={state.predictions}
-                      results={state.results}
-                      breakdown={financeSummary.matchBreakdowns[game.id]}
-                      now={now}
-                      onPredictionChange={handlePredictionChange}
-                    />
-                  ))}
-                </DashboardAccordion>
-              ))}
-
-              {Object.entries(knockoutByRound).map(([roundLabel, games]) => (
-                <DashboardAccordion
-                  key={roundLabel}
-                  title={roundLabel}
-                  subtitle="Jogos do mata-mata"
-                  games={games.length}
-                  pendingCount={getPendingPredictionCount(games)}
-                  isOpen={effectiveOpenDashboardSection === `knockout-${roundLabel}`}
-                  onToggle={() => toggleDashboardSection(`knockout-${roundLabel}`)}
-                >
-                  {games.map((game) => (
-                    <PredictionGameCard
-                      key={game.id}
-                      game={game}
-                      selectedUserId={effectiveSelectedUserId}
-                      selectedParticipant={selectedParticipant}
-                      predictions={state.predictions}
-                      results={state.results}
-                      breakdown={financeSummary.matchBreakdowns[game.id]}
-                      now={now}
-                      onPredictionChange={handlePredictionChange}
-                    />
-                  ))}
-                </DashboardAccordion>
-              ))}
-
-              <div className="grid gap-4 lg:grid-cols-2">
-                <div className="rounded-3xl border border-white/8 bg-black/20 p-4">
-                  <div className="flex items-center gap-3">
-                    <Crown className="h-5 w-5 text-amber-300" />
-                    <h3 className="text-lg font-semibold text-white">Campeao da Copa</h3>
-                  </div>
-                  <input
-                    type="text"
-                    disabled={
-                      !selectedParticipant || specialPickAvailability.status !== "open"
-                    }
-                    value={
-                      effectiveSelectedUserId
-                        ? getSpecialPick(
-                            state.specialPicks,
-                            effectiveSelectedUserId,
-                          )?.champion ?? ""
-                        : ""
-                    }
-                    onChange={(event) =>
-                      handleSpecialPickChange("champion", event.target.value)
-                    }
-                    placeholder="Ex.: Brasil"
-                    className="mt-4 w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-white outline-none transition focus:border-amber-300/60 disabled:cursor-not-allowed disabled:opacity-50"
-                  />
-                  <p className="mt-3 text-xs text-slate-400">
-                    {specialPickAvailability.message}
-                  </p>
-                </div>
-
-                <div className="rounded-3xl border border-white/8 bg-black/20 p-4">
-                  <div className="flex items-center gap-3">
-                    <Goal className="h-5 w-5 text-sky-300" />
-                    <h3 className="text-lg font-semibold text-white">Artilheiro da Copa</h3>
-                  </div>
-                  <input
-                    type="text"
-                    disabled={
-                      !selectedParticipant || specialPickAvailability.status !== "open"
-                    }
-                    value={
-                      effectiveSelectedUserId
-                        ? getSpecialPick(
-                            state.specialPicks,
-                            effectiveSelectedUserId,
-                          )?.topScorer ?? ""
-                        : ""
-                    }
-                    onChange={(event) =>
-                      handleSpecialPickChange("topScorer", event.target.value)
-                    }
-                    placeholder="Ex.: Mbappe"
-                    className="mt-4 w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-white outline-none transition focus:border-sky-300/60 disabled:cursor-not-allowed disabled:opacity-50"
-                  />
-                  <p className="mt-3 text-xs text-slate-400">
-                    {specialPickAvailability.message}
-                  </p>
-                </div>
-              </div>
-            </div>
-          </SectionCard>
-          </motion.div>
-        )}
-
-        {currentPage === "ranking" && (
-          <motion.div key="tab-ranking" {...tabTransition}>
-          <div className="space-y-6">
-            <SectionCard
-              title="Leaderboard"
-              subtitle="Ganhos acumulados, premios finais e acerto de contas"
-              icon={<Medal className="h-6 w-6" />}
-            >
-              <div className="grid gap-4 lg:grid-cols-4">
-                <div className="rounded-3xl border border-amber-300/15 bg-amber-300/5 p-4">
-                  <p className="text-sm text-amber-100/80">Lider em cravos</p>
-                  <p className="mt-2 text-lg font-semibold text-white">
-                    {exactLeaders.length
-                      ? exactLeaders.map((entry) => entry.name).join(", ")
-                      : "Sem lider ainda"}
-                  </p>
-                  <p className="mt-1 text-xs text-slate-400">
-                    Pote final: {formatCurrency(financeSummary.finalAwards.exactHitsPot)}
-                  </p>
-                </div>
-                <div className="rounded-3xl border border-emerald-300/15 bg-emerald-300/5 p-4">
-                  <p className="text-sm text-emerald-100/80">Acertou o campeao</p>
-                  <p className="mt-2 text-lg font-semibold text-white">
-                    {championWinners.length
-                      ? championWinners.map((entry) => entry.name).join(", ")
-                      : "Aguardando definicao oficial"}
-                  </p>
-                  <p className="mt-1 text-xs text-slate-400">
-                    Pote final: {formatCurrency(financeSummary.finalAwards.championPot)}
-                  </p>
-                </div>
-                <div className="rounded-3xl border border-sky-300/15 bg-sky-300/5 p-4">
-                  <p className="text-sm text-sky-100/80">Acertou o artilheiro</p>
-                  <p className="mt-2 text-lg font-semibold text-white">
-                    {topScorerWinners.length
-                      ? topScorerWinners.map((entry) => entry.name).join(", ")
-                      : "Aguardando definicao oficial"}
-                  </p>
-                  <p className="mt-1 text-xs text-slate-400">
-                    Pote final: {formatCurrency(financeSummary.finalAwards.topScorerPot)}
-                  </p>
-                </div>
-                <div className="rounded-3xl border border-fuchsia-300/15 bg-fuchsia-300/5 p-4">
-                  <div className="flex items-center gap-2 text-fuchsia-100/80">
-                    <RotateCcw className="h-4 w-4" />
-                    <p className="text-sm">Acumulado Atual</p>
-                  </div>
-                  <div className="mt-3 space-y-2 text-sm text-slate-200">
-                    <p>
-                      Resultado:{" "}
-                      <span className="font-semibold text-white">
-                        {formatCurrency(currentRollover.result)}
-                      </span>
-                    </p>
-                    <p>
-                      Gols:{" "}
-                      <span className="font-semibold text-white">
-                        {formatCurrency(currentRollover.goals)}
-                      </span>
-                    </p>
-                    <p>
-                      Placar Exato:{" "}
-                      <span className="font-semibold text-white">
-                        {formatCurrency(currentRollover.exact)}
-                      </span>
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-5">
-                <RankingTable ranking={ranking} />
-              </div>
-            </SectionCard>
-
-            <SectionCard
-              title="Grupos"
-              subtitle="Tabelas dinamicas com criterios FIFA: pontos, saldo e gols pro"
-              icon={<Table2 className="h-6 w-6" />}
-            >
-              <div className="grid min-w-0 gap-4 xl:grid-cols-2">
-                {groupsData.map((group) => (
-                  <div
-                    key={group.id}
-                    className="min-w-0 space-y-3 rounded-3xl border border-white/8 bg-black/20 p-4"
-                  >
-                    <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between">
-                      <h3 className="text-lg font-semibold text-white">{group.name}</h3>
-                      <span className="rounded-full bg-white/5 px-3 py-1 text-xs text-slate-400">
-                        3o lugar atual: {standingsByGroup[group.id][2]?.team.shortName ?? "-"}
-                      </span>
-                    </div>
-                    <StandingsTable standings={standingsByGroup[group.id]} />
-                  </div>
-                ))}
-              </div>
-
-              <div className="mt-6 min-w-0 rounded-3xl border border-white/8 bg-black/20 p-4">
-                <h3 className="text-lg font-semibold text-white">
-                  Ranking dos terceiros colocados
-                </h3>
-                <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                  {bestThirds.map((entry) => (
-                    <div key={entry.teamId} className="rounded-2xl border border-white/8 bg-white/5 p-3">
-                      <p className="text-xs uppercase tracking-[0.14em] text-slate-500">
-                        #{entry.thirdPlaceRank} terceiro
-                      </p>
-                      <p className="mt-2 font-semibold text-white">
-                        {entry.groupId} · {entry.team.shortName}
-                      </p>
-                      <p className="mt-1 text-sm text-slate-400">
-                        {entry.points} pts · SG {entry.goalDifference} · GP {entry.goalsFor}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </SectionCard>
-
-            <SectionCard
-              title="Chaveamento"
-              subtitle="16 avos de final em diante preenchidos automaticamente"
-              icon={<GitBranch className="h-6 w-6" />}
-            >
-              <div className="grid min-w-0 gap-4 xl:grid-cols-4">
-                {stageOrder
-                  .filter((stage) => stage !== "group")
-                  .map((stage) => {
-                    const stageGames = knockout.games.filter((game) => game.stage === stage);
-
-                    if (!stageGames.length) {
-                      return null;
-                    }
-
-                    return (
-                      <BracketColumn
-                        key={stage}
-                        title={stageGames[0].roundLabel}
-                        games={stageGames}
-                        state={state}
-                      />
-                    );
-                  })}
-              </div>
-            </SectionCard>
-          </div>
-          </motion.div>
-        )}
-
-        {currentPage === "admin" && (
-          <motion.div key="tab-admin" {...tabTransition}>
-          <div className="space-y-6">
-            <SectionCard
-              title="Administracao"
-              subtitle="Cards de grupos e mata-mata para inserir os resultados oficiais"
-              icon={<ShieldCheck className="h-6 w-6" />}
-            >
-              <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4 text-sm text-emerald-100/90">
-                Ao salvar resultados oficiais, o ranking, as tabelas dos grupos e o
-                chaveamento do mata-mata sao atualizados automaticamente.
-              </div>
-
-              {adminResultFeedback && (
-                <div className="mt-4 rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4 text-sm text-emerald-100">
-                  {adminResultFeedback}
-                </div>
-              )}
-
-              {adminResultError && (
-                <div className="mt-4 rounded-2xl border border-rose-400/20 bg-rose-400/10 p-4 text-sm text-rose-100">
-                  {adminResultError}
-                </div>
-              )}
-
-              <div className="mt-6 space-y-6">
-                {groupsData.map((group) => (
-                  <DashboardAccordion
-                    key={group.id}
-                    title={group.name}
-                    subtitle="Resultados oficiais e tabela do grupo"
-                    games={groupGamesMap[group.id].length}
-                    pendingCount={0}
-                    isOpen={openAdminSection === `admin-group-${group.id}`}
-                    onToggle={() => toggleAdminSection(`admin-group-${group.id}`)}
-                  >
-                    <div className="grid min-w-0 gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-                      <div className="grid min-w-0 gap-3">
-                        {groupGamesMap[group.id].map((game) => {
-                          const result = state.results.find((item) => item.gameId === game.id);
-
-                          return (
-                            <div
-                              key={game.id}
-                              className="rounded-3xl border border-white/8 bg-slate-950/30 p-4"
-                            >
-                              <div className="flex flex-wrap items-start justify-between gap-3">
-                                <div>
-                                  <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
-                                    Jogo {game.matchNumber} · {game.matchdayLabel}
-                                  </p>
-                                  <p className="mt-1 font-semibold text-white">
-                                    {game.homeTeam?.name} x {game.awayTeam?.name}
-                                  </p>
-                                </div>
-                                <label className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-300">
-                                  <input
-                                    type="checkbox"
-                                    checked={result?.finished ?? false}
-                                    onChange={(event) =>
-                                      handleResultFinished(game.id, event.target.checked)
-                                    }
-                                  />
-                                  Encerrado
-                                </label>
-                              </div>
-
-                              <div className="mt-4 grid grid-cols-[1fr_auto_1fr] gap-3">
-                                <input
-                                  type="number"
-                                  inputMode="numeric"
-                                  min={0}
-                                  max={99}
-                                  value={result?.homeScore ?? ""}
-                                  onChange={(event) =>
-                                    handleResultChange(
-                                      game.id,
-                                      "homeScore",
-                                      event.target.value,
-                                    )
-                                  }
-                                  className="rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-center text-lg font-semibold text-white outline-none transition focus:border-emerald-400/60"
-                                />
-                                <div className="flex items-center justify-center text-xl text-slate-500">
-                                  x
-                                </div>
-                                <input
-                                  type="number"
-                                  inputMode="numeric"
-                                  min={0}
-                                  max={99}
-                                  value={result?.awayScore ?? ""}
-                                  onChange={(event) =>
-                                    handleResultChange(
-                                      game.id,
-                                      "awayScore",
-                                      event.target.value,
-                                    )
-                                  }
-                                  className="rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-center text-lg font-semibold text-white outline-none transition focus:border-emerald-400/60"
-                                />
-                              </div>
-
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setConfirmingOfficialGameId(game.id);
-                                  setAdminResultError("");
-                                  setAdminResultFeedback("");
-                                }}
-                                disabled={
-                                  isSavingOfficialResult &&
-                                  savingOfficialGameId === game.id
-                                }
-                                className="mt-4 inline-flex w-full items-center justify-center rounded-2xl border border-emerald-400/25 bg-emerald-400/10 px-4 py-3 text-sm font-medium text-emerald-100 transition hover:bg-emerald-400/15 disabled:cursor-not-allowed disabled:opacity-60"
-                              >
-                                {isSavingOfficialResult && savingOfficialGameId === game.id
-                                  ? "Salvando..."
-                                  : "Salvar resultado"}
-                              </button>
-
-                              {confirmingOfficialGameId === game.id && (
-                                <div className="mt-3 rounded-2xl border border-amber-400/20 bg-amber-400/10 p-4 text-sm text-amber-50">
-                                  <p className="font-medium text-white">
-                                    Confirmar salvamento deste resultado?
-                                  </p>
-                                  <p className="mt-1 text-amber-100/90">
-                                    Placar: {result?.homeScore ?? "-"} x{" "}
-                                    {result?.awayScore ?? "-"} ·{" "}
-                                    {result?.finished ? "Encerrado" : "Agendado"}
-                                  </p>
-                                  <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                                    <button
-                                      type="button"
-                                      onClick={() => persistOfficialResult(game.id)}
-                                      className="inline-flex flex-1 items-center justify-center rounded-2xl border border-emerald-400/25 bg-emerald-400/15 px-4 py-3 font-medium text-emerald-100 transition hover:bg-emerald-400/20"
-                                    >
-                                      Confirmar e salvar no banco
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => setConfirmingOfficialGameId(null)}
-                                      className="inline-flex flex-1 items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-3 font-medium text-white transition hover:bg-white/10"
-                                    >
-                                      Cancelar
-                                    </button>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-
-                      <StandingsTable standings={standingsByGroup[group.id]} />
-                    </div>
-                  </DashboardAccordion>
-                ))}
-              </div>
-            </SectionCard>
-
-            <SectionCard
-              title="Mata-mata"
-              subtitle="Cards oficiais do round of 32 ate a final"
-              icon={<GitBranch className="h-6 w-6" />}
-            >
+          {!isLoggedIn && requiresAuthenticatedPage ? (
+            <motion.div key="protected-login" {...tabTransition}>
+              <AccessStateCard
+                title="Login necessario"
+                description="Escolha um participante na tela de acesso para liberar palpites, ranking e administracao."
+                actionHref="/acesso"
+                actionLabel="Ir para acesso"
+              />
+            </motion.div>
+          ) : isAdminPageBlocked ? (
+            <motion.div key="protected-role" {...tabTransition}>
+              <AccessStateCard
+                title="Acesso restrito"
+                description="A pagina de admin fica liberada apenas para admin e moderador. Usuarios comuns continuam com acesso a palpites e ranking."
+                actionHref="/"
+                actionLabel="Voltar ao dashboard"
+              />
+            </motion.div>
+          ) : currentPage === "menu" ? (
+            <motion.div key="page-menu" {...tabTransition}>
               <div className="space-y-6">
-                {Object.entries(knockoutByRound).map(([roundLabel, games]) => (
-                  <div
-                    key={roundLabel}
-                    className="min-w-0 space-y-4 rounded-3xl border border-white/8 bg-black/20 p-4"
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <h3 className="text-lg font-semibold text-white">{roundLabel}</h3>
-                        <p className="text-sm text-slate-400">
-                          Os confrontos aparecem automaticamente conforme a classificacao.
-                        </p>
-                      </div>
-                      <span className="rounded-full bg-white/5 px-3 py-1 text-xs text-slate-400">
-                        {games.length} jogos
-                      </span>
-                    </div>
-
-                    <div className="grid min-w-0 gap-3 md:grid-cols-2">
-                      {games.map((game) => {
-                        const result = state.results.find((item) => item.gameId === game.id);
-
-                        return (
-                          <div
-                            key={game.id}
-                            className="rounded-3xl border border-white/8 bg-slate-950/30 p-4"
-                          >
-                            <div className="flex flex-wrap items-start justify-between gap-3">
-                              <div>
-                                <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
-                                  Jogo {game.matchNumber}
-                                </p>
-                                <div className="mt-2 space-y-1 font-semibold text-white">
-                                  <div>
-                                    <TeamLabel team={game.homeTeam} fallback="A definir" />
-                                  </div>
-                                  <div>
-                                    <TeamLabel team={game.awayTeam} fallback="A definir" />
-                                  </div>
-                                </div>
-                              </div>
-                              <label className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-300">
-                                <input
-                                  type="checkbox"
-                                  checked={result?.finished ?? false}
-                                  onChange={(event) =>
-                                    handleResultFinished(game.id, event.target.checked)
-                                  }
-                                />
-                                Encerrado
-                              </label>
-                            </div>
-
-                            <div className="mt-4 grid grid-cols-[1fr_auto_1fr] gap-3">
-                              <input
-                                type="number"
-                                inputMode="numeric"
-                                min={0}
-                                max={99}
-                                value={result?.homeScore ?? ""}
-                                onChange={(event) =>
-                                  handleResultChange(game.id, "homeScore", event.target.value)
-                                }
-                                className="rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-center text-lg font-semibold text-white outline-none transition focus:border-emerald-400/60"
-                              />
-                              <div className="flex items-center justify-center text-xl text-slate-500">
-                                x
-                              </div>
-                              <input
-                                type="number"
-                                inputMode="numeric"
-                                min={0}
-                                max={99}
-                                value={result?.awayScore ?? ""}
-                                onChange={(event) =>
-                                  handleResultChange(game.id, "awayScore", event.target.value)
-                                }
-                                className="rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-center text-lg font-semibold text-white outline-none transition focus:border-emerald-400/60"
-                              />
-                            </div>
-
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setConfirmingOfficialGameId(game.id);
-                                setAdminResultError("");
-                                setAdminResultFeedback("");
-                              }}
-                              disabled={
-                                isSavingOfficialResult && savingOfficialGameId === game.id
-                              }
-                              className="mt-4 inline-flex w-full items-center justify-center rounded-2xl border border-emerald-400/25 bg-emerald-400/10 px-4 py-3 text-sm font-medium text-emerald-100 transition hover:bg-emerald-400/15 disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              {isSavingOfficialResult && savingOfficialGameId === game.id
-                                ? "Salvando..."
-                                : "Salvar resultado"}
-                            </button>
-
-                            {confirmingOfficialGameId === game.id && (
-                              <div className="mt-3 rounded-2xl border border-amber-400/20 bg-amber-400/10 p-4 text-sm text-amber-50">
-                                <p className="font-medium text-white">
-                                  Confirmar salvamento deste resultado?
-                                </p>
-                                <p className="mt-1 text-amber-100/90">
-                                  Placar: {result?.homeScore ?? "-"} x{" "}
-                                  {result?.awayScore ?? "-"} ·{" "}
-                                  {result?.finished ? "Encerrado" : "Agendado"}
-                                </p>
-                                <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                                  <button
-                                    type="button"
-                                    onClick={() => persistOfficialResult(game.id)}
-                                    className="inline-flex flex-1 items-center justify-center rounded-2xl border border-emerald-400/25 bg-emerald-400/15 px-4 py-3 font-medium text-emerald-100 transition hover:bg-emerald-400/20"
-                                  >
-                                    Confirmar e salvar no banco
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setConfirmingOfficialGameId(null)}
-                                    className="inline-flex flex-1 items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-3 font-medium text-white transition hover:bg-white/10"
-                                  >
-                                    Cancelar
-                                  </button>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="mt-6 grid gap-4 lg:grid-cols-2">
-                <div className="rounded-3xl border border-white/8 bg-black/20 p-4">
-                  <div className="flex items-center gap-3">
-                    <Crown className="h-5 w-5 text-amber-300" />
-                    <h3 className="text-lg font-semibold text-white">Oficial da Copa</h3>
-                  </div>
-                  <label className="mt-4 block">
-                    <span className="text-sm text-slate-400">Campeao oficial</span>
-                    <input
-                      type="text"
-                      value={state.awards.champion ?? ""}
-                      onChange={(event) =>
-                        setState((currentState) => ({
-                          ...currentState,
-                          awards: {
-                            ...currentState.awards,
-                            champion: event.target.value || null,
-                          },
-                        }))
-                      }
-                      placeholder="Ex.: Brasil"
-                      className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-white outline-none transition focus:border-amber-300/60"
-                    />
-                  </label>
-
-                  <label className="mt-4 block">
-                    <span className="text-sm text-slate-400">Artilheiro oficial</span>
-                    <input
-                      type="text"
-                      value={state.awards.topScorer ?? ""}
-                      onChange={(event) =>
-                        setState((currentState) => ({
-                          ...currentState,
-                          awards: {
-                            ...currentState.awards,
-                            topScorer: event.target.value || null,
-                          },
-                        }))
-                      }
-                      placeholder="Ex.: Mbappe"
-                      className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-white outline-none transition focus:border-sky-300/60"
-                    />
-                  </label>
-                </div>
-
-                <div className="rounded-3xl border border-white/8 bg-black/20 p-4">
-                  <p className="text-sm font-semibold text-white">Acoes da demo</p>
-                  <button
-                    type="button"
-                    onClick={resetDemoData}
-                    className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 font-medium text-white transition hover:bg-white/10"
-                  >
-                    <RotateCcw className="h-4 w-4" />
-                    Restaurar massa inicial
-                  </button>
-                </div>
-              </div>
-            </SectionCard>
-          </div>
-          </motion.div>
-        )}
-        </AnimatePresence>
-
-        <AnimatePresence>
-        {isCreateParticipantOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm"
-          >
-            <motion.div
-              initial={{ opacity: 0, y: 14, scale: 0.98 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 14, scale: 0.98 }}
-              transition={{ duration: 0.2, ease: "easeOut" }}
-              className="glass-surface w-full max-w-md rounded-3xl p-5"
-            >
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-sm font-semibold uppercase tracking-[0.22em] text-emerald-300/80">
-                    Novo Participante
-                  </p>
-                  <h3 className="mt-2 text-xl font-semibold text-white">
-                    Cadastro rapido para entrar no bolao
-                  </h3>
-                </div>
-                <button
-                  type="button"
-                  onClick={closeCreateParticipantCard}
-                  className="rounded-2xl border border-white/10 bg-white/5 p-2 text-slate-300 transition hover:bg-white/10 active:scale-95"
-                  aria-label="Fechar cadastro"
+                <SectionCard
+                  title="Dashboard"
+                  subtitle="Proximos jogos e panorama rapido do bolao"
+                  icon={<Trophy className="h-6 w-6" />}
                 >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-
-              <div className="mt-5 space-y-4">
-                <label className="block">
-                  <span className="text-sm text-slate-300">Nome do participante</span>
-                  <input
-                    type="text"
-                    autoFocus
-                    value={newParticipantName}
-                    onChange={(event) => {
-                      setNewParticipantName(event.target.value);
-                      if (participantFormError) {
-                        setParticipantFormError("");
-                      }
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        handleCreateParticipant();
-                      }
-                    }}
-                    placeholder="Ex.: Marcelo"
-                    className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none transition focus:border-emerald-400/60"
-                  />
-                </label>
-
-                <div className="rounded-2xl border border-white/8 bg-white/5 p-4 text-sm text-slate-300">
-                  Ao salvar, o novo participante entra imediatamente no acesso, no
-                  ranking e no fluxo completo de palpites.
-                </div>
-
-                {participantFormError && (
-                  <div className="rounded-2xl border border-rose-400/20 bg-rose-400/10 p-3 text-sm text-rose-100">
-                    {participantFormError}
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <StatCard
+                      label="Participantes"
+                      value={String(participantList.length)}
+                      helper="Usuarios cadastrados no bolao"
+                    />
+                    <StatCard
+                      label="Proximos jogos"
+                      value={String(upcomingGames.length)}
+                      helper="Partidas mais proximas do calendario"
+                    />
+                    <StatCard
+                      label="Jogos finalizados"
+                      value={String(finishedGamesCount)}
+                      helper="Resultados oficiais ja inseridos"
+                    />
+                    <StatCard
+                      label="Acumulado atual"
+                      value={formatCurrency(
+                        currentRollover.result + currentRollover.goals + currentRollover.exact,
+                      )}
+                      helper="Soma dos potes acumulados no momento"
+                    />
                   </div>
-                )}
+                </SectionCard>
 
-                {participantFormSuccess && (
-                  <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-3 text-sm text-emerald-100">
-                    {participantFormSuccess}
-                  </div>
-                )}
+                <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
+                  <SectionCard
+                    title="Agenda"
+                    subtitle="Lista curta com os proximos confrontos"
+                    icon={<CalendarDays className="h-6 w-6" />}
+                  >
+                    <div className="space-y-3">
+                      {upcomingGames.length ? (
+                        upcomingGames.map((game) => (
+                          <DashboardGameRow
+                            key={game.id}
+                            game={game}
+                            result={state.results.find((item) => item.gameId === game.id)}
+                          />
+                        ))
+                      ) : (
+                        <div className="rounded-2xl border border-white/8 bg-black/20 p-4 text-sm text-slate-300">
+                          Nenhum proximo jogo encontrado no calendario.
+                        </div>
+                      )}
+                    </div>
+                  </SectionCard>
 
-                <div className="flex flex-col gap-3 sm:flex-row">
-                  <button
-                    type="button"
-                    onClick={closeCreateParticipantCard}
-                  className="flex-1 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 font-medium text-white transition hover:bg-white/10 active:scale-95"
+                  <SectionCard
+                    title="Resumo"
+                    subtitle="Informacoes uteis para acompanhar o andamento"
+                    icon={<Medal className="h-6 w-6" />}
                   >
-                    Cancelar
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleCreateParticipant}
-                    disabled={isSavingParticipant}
-                    className="flex-1 rounded-2xl border border-emerald-400/20 bg-emerald-400/15 px-4 py-3 font-medium text-emerald-100 transition hover:bg-emerald-400/20 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {isSavingParticipant ? "Salvando..." : "Salvar participante"}
-                  </button>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <StatCard
+                        label="Palpites salvos"
+                        value={String(predictionsCount)}
+                        helper="Palpites persistidos para os jogos"
+                      />
+                      <StatCard
+                        label="Lider em cravos"
+                        value={
+                          exactLeaders.length
+                            ? exactLeaders.map((entry) => entry.name).join(", ")
+                            : "Sem lider"
+                        }
+                        helper="Atualizado conforme resultados oficiais"
+                      />
+                      <StatCard
+                        label="Pendentes"
+                        value={isLoggedIn ? String(pendingPredictionsCount) : "-"}
+                        helper={
+                          isLoggedIn
+                            ? "Jogos abertos sem palpite completo"
+                            : "Faca login para ver seus pendentes"
+                        }
+                      />
+                      <StatCard
+                        label="Investimento"
+                        value={formatCurrency(TOURNAMENT_INVESTMENT_TOTAL)}
+                        helper="Acerto final por participante"
+                      />
+                    </div>
+
+                    <div className="mt-4 rounded-2xl border border-white/8 bg-black/20 p-4 text-sm text-slate-300">
+                      {selectedParticipant ? (
+                        <>
+                          <p>
+                            Usuario ativo:{" "}
+                            <span className="font-semibold text-white">
+                              {selectedParticipant.name}
+                            </span>
+                          </p>
+                          <p className="mt-2">
+                            Perfil atual:{" "}
+                            <span className="font-semibold text-white">
+                              {getRoleLabel(selectedParticipant.role)}
+                            </span>
+                            .
+                            {selectedParticipant.role === "user"
+                              ? " Acesso a palpites e ranking."
+                              : selectedParticipant.role === "moderator"
+                                ? " Acesso a palpites, ranking e admin."
+                                : " Acesso completo ao admin e ao controle de usuarios."}
+                          </p>
+                        </>
+                      ) : (
+                        <p>
+                          Faca login em{" "}
+                          <span className="font-semibold text-white">Acesso</span> para
+                          liberar palpites, ranking e administracao conforme o seu perfil.
+                        </p>
+                      )}
+                    </div>
+                  </SectionCard>
                 </div>
               </div>
             </motion.div>
-          </motion.div>
-        )}
+          ) : currentPage === "acesso" ? (
+            <motion.div key="tab-acesso" {...tabTransition}>
+              <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
+                <SectionCard
+                  title="Login"
+                  subtitle="Escolha o participante para entrar no sistema"
+                  icon={<UserCircle2 className="h-6 w-6" />}
+                >
+                  {selectedParticipant && (
+                    <div className="mb-5 rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4 text-sm text-emerald-100">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <p className="font-semibold text-white">
+                            Sessao ativa com {selectedParticipant.name}
+                          </p>
+                          <p className="mt-1 text-emerald-100/80">
+                            Troque de usuario quando quiser ou saia para bloquear o acesso local.
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <RoleBadge role={selectedParticipant.role} />
+                          <button
+                            type="button"
+                            onClick={handleLogout}
+                            className="inline-flex items-center justify-center rounded-2xl border border-rose-400/20 bg-rose-400/10 px-4 py-2 text-sm font-medium text-rose-100 transition hover:bg-rose-400/15"
+                          >
+                            Sair
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {participantList.map((participant) => {
+                      const isActive = participant.id === selectedUserId;
+
+                      return (
+                        <button
+                          key={participant.id}
+                          type="button"
+                          onClick={() => handleLogin(participant.id)}
+                          className={`rounded-2xl border px-4 py-4 text-left transition ${
+                            isActive
+                              ? "border-white/40 bg-white/10"
+                              : "border-white/8 bg-black/20 hover:border-white/20 hover:bg-white/5"
+                          }`}
+                          style={{
+                            boxShadow: isActive
+                              ? `0 0 0 1px ${participant.accentColor}, inset 0 0 25px rgba(255,255,255,0.03)`
+                              : undefined,
+                          }}
+                        >
+                          <div className="flex items-start gap-3">
+                            <div
+                              className="flex h-11 w-11 items-center justify-center rounded-2xl text-sm font-bold text-white"
+                              style={{ backgroundColor: participant.accentColor }}
+                            >
+                              {participant.name.slice(0, 2).toUpperCase()}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="font-semibold text-white">{participant.name}</p>
+                              <p className="mt-1 text-xs text-slate-400">
+                                {isActive ? "Usuario ativo" : "Entrar no sistema"}
+                              </p>
+                              <div className="mt-3">
+                                <RoleBadge role={participant.role} />
+                              </div>
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="mt-5 rounded-2xl border border-white/8 bg-black/20 p-4 text-sm text-slate-300">
+                    O login e simples: basta selecionar seu nome para liberar as paginas
+                    conforme o papel cadastrado.
+                  </div>
+
+                  <div className="mt-5">
+                    <button
+                      type="button"
+                      onClick={openCreateParticipantCard}
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-emerald-400/25 bg-emerald-400/10 px-4 py-3 font-medium text-emerald-100 transition hover:bg-emerald-400/15"
+                    >
+                      <Plus className="h-4 w-4" />
+                      Adicionar participante
+                    </button>
+                  </div>
+                </SectionCard>
+
+                <SectionCard
+                  title="Regras"
+                  subtitle="Perfis, premios e janela de edicao"
+                  icon={<ShieldCheck className="h-6 w-6" />}
+                >
+                  <div className="grid gap-3">
+                    {scoringRules.map((rule) => (
+                      <div
+                        key={rule.label}
+                        className="flex items-center justify-between rounded-2xl border border-white/8 bg-black/20 px-4 py-3"
+                      >
+                        <span className="text-sm text-slate-300">{rule.label}</span>
+                        <span className="rounded-full bg-emerald-400/10 px-3 py-1 text-sm font-semibold text-emerald-200">
+                          {formatCurrency(rule.value)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="mt-4 rounded-2xl border border-white/8 bg-black/20 p-4 text-sm text-slate-300">
+                    <p className="font-semibold text-white">Perfis de acesso</p>
+                    <p className="mt-2">Admin: controla usuarios e resultados oficiais.</p>
+                    <p className="mt-1">Moderador: atualiza resultados na pagina de admin.</p>
+                    <p className="mt-1">Usuario: acessa apenas dashboard, palpites e ranking.</p>
+                  </div>
+
+                  <div className="mt-4 rounded-2xl border border-amber-300/15 bg-amber-300/5 p-4 text-sm text-amber-100/90">
+                    Cada jogo forma 3 potes: resultado, gols e placar exato. Se ninguem
+                    acertar um criterio, o valor acumula para o proximo jogo. Os palpites
+                    podem ser editados ate 1 minuto antes do apito inicial.
+                  </div>
+
+                  <div className="mt-4 rounded-2xl border border-emerald-400/15 bg-emerald-400/5 p-4 text-sm text-emerald-100/90">
+                    Investimento total por participante:{" "}
+                    <span className="font-semibold text-white">
+                      {formatCurrency(TOURNAMENT_INVESTMENT_TOTAL)}
+                    </span>
+                    . O encontro de contas acontece no fim com a formula ganhos menos
+                    investimento total.
+                  </div>
+
+                  <div className="mt-4 grid gap-3">
+                    {awardRules.map((award) => (
+                      <div
+                        key={award.label}
+                        className="rounded-2xl border border-white/8 bg-black/20 px-4 py-3"
+                      >
+                        <p className="text-sm font-medium text-white">{award.label}</p>
+                        <p className="mt-1 text-xs text-slate-400">
+                          Pote final atual:{" "}
+                          {formatCurrency(participantList.length * award.prize)}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </SectionCard>
+              </div>
+            </motion.div>
+          ) : currentPage === "palpites" ? (
+            <motion.div key="tab-palpites" {...tabTransition}>
+              <SectionCard
+                title="Palpites"
+                subtitle="Lista ordenada pela data de cada jogo"
+                icon={<Swords className="h-6 w-6" />}
+              >
+                <div className="mb-6 grid gap-3 lg:grid-cols-3">
+                  <div className="rounded-2xl border border-white/8 bg-black/20 p-4 text-sm text-slate-300">
+                    <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
+                      Usuario
+                    </p>
+                    <p className="mt-2 text-lg font-semibold text-white">
+                      {selectedParticipant?.name}
+                    </p>
+                    <p className="mt-1">
+                      Os palpites ficam abertos ate 1 minuto antes de cada jogo.
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-white/8 bg-black/20 p-4 text-sm text-slate-300">
+                    <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
+                      Jogos abertos
+                    </p>
+                    <p className="mt-2 text-lg font-semibold text-white">
+                      {openPredictionsCount}
+                    </p>
+                    <p className="mt-1">
+                      Partidas com janela de palpite ainda aberta.
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-white/8 bg-black/20 p-4 text-sm text-slate-300">
+                    <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
+                      Pendentes
+                    </p>
+                    <p className="mt-2 text-lg font-semibold text-white">
+                      {pendingPredictionsCount}
+                    </p>
+                    <p className="mt-1">
+                      Jogos abertos sem placar completo salvo.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-6">
+                  {predictionGamesByDate.map((group) => (
+                    <div key={group.dayKey} className="space-y-4">
+                      <div className="rounded-2xl border border-white/8 bg-white/5 px-4 py-3">
+                        <p className="text-sm font-semibold text-white">{group.label}</p>
+                        <p className="mt-1 text-xs text-slate-400">
+                          {group.games.length}{" "}
+                          {group.games.length === 1 ? "jogo" : "jogos"}
+                        </p>
+                      </div>
+                      {group.games.map((game) => (
+                        <PredictionGameCard
+                          key={game.id}
+                          game={game}
+                          selectedUserId={effectiveSelectedUserId}
+                          selectedParticipant={selectedParticipant}
+                          predictions={state.predictions}
+                          results={state.results}
+                          breakdown={financeSummary.matchBreakdowns[game.id]}
+                          now={now}
+                          onPredictionChange={handlePredictionChange}
+                          onSaveRequest={requestPredictionSave}
+                          onSaveConfirm={persistPrediction}
+                          isSaving={isSavingPrediction && savingPredictionGameId === game.id}
+                          isConfirming={confirmingPredictionGameId === game.id}
+                          feedbackMessage={
+                            predictionFeedbackGameId === game.id ? predictionFeedback : ""
+                          }
+                          errorMessage={
+                            predictionErrorGameId === game.id ? predictionError : ""
+                          }
+                        />
+                      ))}
+                    </div>
+                  ))}
+
+                  <div className="grid gap-4 lg:grid-cols-2">
+                    <div className="rounded-3xl border border-white/8 bg-black/20 p-4">
+                      <div className="flex items-center gap-3">
+                        <Crown className="h-5 w-5 text-amber-300" />
+                        <h3 className="text-lg font-semibold text-white">Campeao da Copa</h3>
+                      </div>
+                      <input
+                        type="text"
+                        disabled={!selectedParticipant || specialPickAvailability.status !== "open"}
+                        value={selectedSpecialPick?.champion ?? ""}
+                        onChange={(event) =>
+                          handleSpecialPickChange("champion", event.target.value)
+                        }
+                        placeholder="Ex.: Brasil"
+                        className="mt-4 w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-white outline-none transition focus:border-amber-300/60 disabled:cursor-not-allowed disabled:opacity-50"
+                      />
+                      <p className="mt-3 text-xs text-slate-400">
+                        {specialPickAvailability.message}
+                      </p>
+                    </div>
+
+                    <div className="rounded-3xl border border-white/8 bg-black/20 p-4">
+                      <div className="flex items-center gap-3">
+                        <Goal className="h-5 w-5 text-sky-300" />
+                        <h3 className="text-lg font-semibold text-white">Artilheiro da Copa</h3>
+                      </div>
+                      <input
+                        type="text"
+                        disabled={!selectedParticipant || specialPickAvailability.status !== "open"}
+                        value={selectedSpecialPick?.topScorer ?? ""}
+                        onChange={(event) =>
+                          handleSpecialPickChange("topScorer", event.target.value)
+                        }
+                        placeholder="Ex.: Mbappe"
+                        className="mt-4 w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-white outline-none transition focus:border-sky-300/60 disabled:cursor-not-allowed disabled:opacity-50"
+                      />
+                      <p className="mt-3 text-xs text-slate-400">
+                        {specialPickAvailability.message}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="rounded-3xl border border-white/8 bg-black/20 p-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <p className="text-sm text-slate-300">
+                        Campeao e artilheiro tambem ficam persistidos no banco.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={persistSpecialPick}
+                        disabled={!selectedParticipant || isSavingSpecialPick || specialPickAvailability.status !== "open"}
+                        className="inline-flex items-center justify-center rounded-2xl border border-emerald-400/25 bg-emerald-400/10 px-4 py-3 text-sm font-medium text-emerald-100 transition hover:bg-emerald-400/15 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {isSavingSpecialPick ? "Salvando..." : "Salvar campeao e artilheiro"}
+                      </button>
+                    </div>
+
+                    {specialPickFeedback && (
+                      <div className="mt-3 rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-3 text-xs text-emerald-100">
+                        {specialPickFeedback}
+                      </div>
+                    )}
+
+                    {specialPickError && (
+                      <div className="mt-3 rounded-2xl border border-rose-400/20 bg-rose-400/10 p-3 text-xs text-rose-100">
+                        {specialPickError}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </SectionCard>
+            </motion.div>
+          ) : currentPage === "ranking" ? (
+            <motion.div key="tab-ranking" {...tabTransition}>
+              <div className="space-y-6">
+                <SectionCard
+                  title="Leaderboard"
+                  subtitle="Ganhos acumulados, premios finais e acerto de contas"
+                  icon={<Medal className="h-6 w-6" />}
+                >
+                  <div className="grid gap-4 lg:grid-cols-4">
+                    <div className="rounded-3xl border border-amber-300/15 bg-amber-300/5 p-4">
+                      <p className="text-sm text-amber-100/80">Lider em cravos</p>
+                      <p className="mt-2 text-lg font-semibold text-white">
+                        {exactLeaders.length
+                          ? exactLeaders.map((entry) => entry.name).join(", ")
+                          : "Sem lider ainda"}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-400">
+                        Pote final: {formatCurrency(financeSummary.finalAwards.exactHitsPot)}
+                      </p>
+                    </div>
+                    <div className="rounded-3xl border border-emerald-300/15 bg-emerald-300/5 p-4">
+                      <p className="text-sm text-emerald-100/80">Acertou o campeao</p>
+                      <p className="mt-2 text-lg font-semibold text-white">
+                        {championWinners.length
+                          ? championWinners.map((entry) => entry.name).join(", ")
+                          : "Aguardando definicao oficial"}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-400">
+                        Pote final: {formatCurrency(financeSummary.finalAwards.championPot)}
+                      </p>
+                    </div>
+                    <div className="rounded-3xl border border-sky-300/15 bg-sky-300/5 p-4">
+                      <p className="text-sm text-sky-100/80">Acertou o artilheiro</p>
+                      <p className="mt-2 text-lg font-semibold text-white">
+                        {topScorerWinners.length
+                          ? topScorerWinners.map((entry) => entry.name).join(", ")
+                          : "Aguardando definicao oficial"}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-400">
+                        Pote final: {formatCurrency(financeSummary.finalAwards.topScorerPot)}
+                      </p>
+                    </div>
+                    <div className="rounded-3xl border border-fuchsia-300/15 bg-fuchsia-300/5 p-4">
+                      <div className="flex items-center gap-2 text-fuchsia-100/80">
+                        <RotateCcw className="h-4 w-4" />
+                        <p className="text-sm">Acumulado Atual</p>
+                      </div>
+                      <div className="mt-3 space-y-2 text-sm text-slate-200">
+                        <p>
+                          Resultado:{" "}
+                          <span className="font-semibold text-white">
+                            {formatCurrency(currentRollover.result)}
+                          </span>
+                        </p>
+                        <p>
+                          Gols:{" "}
+                          <span className="font-semibold text-white">
+                            {formatCurrency(currentRollover.goals)}
+                          </span>
+                        </p>
+                        <p>
+                          Placar Exato:{" "}
+                          <span className="font-semibold text-white">
+                            {formatCurrency(currentRollover.exact)}
+                          </span>
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-5">
+                    <RankingTable ranking={ranking} />
+                  </div>
+                </SectionCard>
+
+                <SectionCard
+                  title="Grupos"
+                  subtitle="Tabelas dinamicas com criterios FIFA: pontos, saldo e gols pro"
+                  icon={<Table2 className="h-6 w-6" />}
+                >
+                  <div className="grid min-w-0 gap-4 xl:grid-cols-2">
+                    {groupsData.map((group) => (
+                      <div
+                        key={group.id}
+                        className="min-w-0 space-y-3 rounded-3xl border border-white/8 bg-black/20 p-4"
+                      >
+                        <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between">
+                          <h3 className="text-lg font-semibold text-white">{group.name}</h3>
+                          <span className="rounded-full bg-white/5 px-3 py-1 text-xs text-slate-400">
+                            3o lugar atual: {standingsByGroup[group.id][2]?.team.shortName ?? "-"}
+                          </span>
+                        </div>
+                        <StandingsTable standings={standingsByGroup[group.id]} />
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="mt-6 min-w-0 rounded-3xl border border-white/8 bg-black/20 p-4">
+                    <h3 className="text-lg font-semibold text-white">
+                      Ranking dos terceiros colocados
+                    </h3>
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                      {bestThirds.map((entry) => (
+                        <div
+                          key={entry.teamId}
+                          className="rounded-2xl border border-white/8 bg-white/5 p-3"
+                        >
+                          <p className="text-xs uppercase tracking-[0.14em] text-slate-500">
+                            #{entry.thirdPlaceRank} terceiro
+                          </p>
+                          <p className="mt-2 font-semibold text-white">
+                            {entry.groupId} · {entry.team.shortName}
+                          </p>
+                          <p className="mt-1 text-sm text-slate-400">
+                            {entry.points} pts · SG {entry.goalDifference} · GP {entry.goalsFor}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </SectionCard>
+
+                <SectionCard
+                  title="Chaveamento"
+                  subtitle="16 avos de final em diante preenchidos automaticamente"
+                  icon={<GitBranch className="h-6 w-6" />}
+                >
+                  <div className="grid min-w-0 gap-4 xl:grid-cols-4">
+                    {stageOrder
+                      .filter((stage) => stage !== "group")
+                      .map((stage) => {
+                        const stageGames = knockout.games.filter((game) => game.stage === stage);
+
+                        if (!stageGames.length) {
+                          return null;
+                        }
+
+                        return (
+                          <BracketColumn
+                            key={stage}
+                            title={stageGames[0].roundLabel}
+                            games={stageGames}
+                            state={state}
+                          />
+                        );
+                      })}
+                  </div>
+                </SectionCard>
+              </div>
+            </motion.div>
+          ) : currentPage === "admin" ? (
+            <motion.div key="tab-admin" {...tabTransition}>
+              <div className="space-y-6">
+                <SectionCard
+                  title="Administracao"
+                  subtitle="Resultados oficiais da fase de grupos"
+                  icon={<ShieldCheck className="h-6 w-6" />}
+                >
+                  <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4 text-sm text-emerald-100/90">
+                    {currentUserRole === "moderator"
+                      ? "Voce esta como moderador e pode atualizar resultados oficiais."
+                      : "Como admin, voce pode atualizar resultados oficiais e controlar os papeis dos usuarios."}
+                  </div>
+
+                  {adminResultFeedback && (
+                    <div className="mt-4 rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4 text-sm text-emerald-100">
+                      {adminResultFeedback}
+                    </div>
+                  )}
+
+                  {adminResultError && (
+                    <div className="mt-4 rounded-2xl border border-rose-400/20 bg-rose-400/10 p-4 text-sm text-rose-100">
+                      {adminResultError}
+                    </div>
+                  )}
+
+                  <div className="mt-6 space-y-6">
+                    {groupsData.map((group) => (
+                      <DashboardAccordion
+                        key={group.id}
+                        title={group.name}
+                        subtitle="Resultados oficiais e tabela do grupo"
+                        games={groupGamesMap[group.id].length}
+                        pendingCount={0}
+                        isOpen={openAdminSection === `admin-group-${group.id}`}
+                        onToggle={() => toggleAdminSection(`admin-group-${group.id}`)}
+                      >
+                        <div className="grid min-w-0 gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+                          <div className="grid min-w-0 gap-3">
+                            {groupGamesMap[group.id].map((game) => {
+                              const result = state.results.find((item) => item.gameId === game.id);
+
+                              return (
+                                <div
+                                  key={game.id}
+                                  className="rounded-3xl border border-white/8 bg-slate-950/30 p-4"
+                                >
+                                  <div className="flex flex-wrap items-start justify-between gap-3">
+                                    <div>
+                                      <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
+                                        Jogo {game.matchNumber} · {game.matchdayLabel}
+                                      </p>
+                                      <p className="mt-1 font-semibold text-white">
+                                        {game.homeTeam?.name} x {game.awayTeam?.name}
+                                      </p>
+                                    </div>
+                                    <label className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-300">
+                                      <input
+                                        type="checkbox"
+                                        checked={result?.finished ?? false}
+                                        onChange={(event) =>
+                                          handleResultFinished(game.id, event.target.checked)
+                                        }
+                                      />
+                                      Encerrado
+                                    </label>
+                                  </div>
+
+                                  <div className="mt-4 grid grid-cols-[1fr_auto_1fr] gap-3">
+                                    <input
+                                      type="number"
+                                      inputMode="numeric"
+                                      min={0}
+                                      max={99}
+                                      value={result?.homeScore ?? ""}
+                                      onChange={(event) =>
+                                        handleResultChange(
+                                          game.id,
+                                          "homeScore",
+                                          event.target.value,
+                                        )
+                                      }
+                                      className="rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-center text-lg font-semibold text-white outline-none transition focus:border-emerald-400/60"
+                                    />
+                                    <div className="flex items-center justify-center text-xl text-slate-500">
+                                      x
+                                    </div>
+                                    <input
+                                      type="number"
+                                      inputMode="numeric"
+                                      min={0}
+                                      max={99}
+                                      value={result?.awayScore ?? ""}
+                                      onChange={(event) =>
+                                        handleResultChange(
+                                          game.id,
+                                          "awayScore",
+                                          event.target.value,
+                                        )
+                                      }
+                                      className="rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-center text-lg font-semibold text-white outline-none transition focus:border-emerald-400/60"
+                                    />
+                                  </div>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setConfirmingOfficialGameId(game.id);
+                                      setAdminResultError("");
+                                      setAdminResultFeedback("");
+                                    }}
+                                    disabled={isSavingOfficialResult && savingOfficialGameId === game.id}
+                                    className="mt-4 inline-flex w-full items-center justify-center rounded-2xl border border-emerald-400/25 bg-emerald-400/10 px-4 py-3 text-sm font-medium text-emerald-100 transition hover:bg-emerald-400/15 disabled:cursor-not-allowed disabled:opacity-60"
+                                  >
+                                    {isSavingOfficialResult && savingOfficialGameId === game.id
+                                      ? "Salvando..."
+                                      : "Salvar resultado"}
+                                  </button>
+
+                                  {confirmingOfficialGameId === game.id && (
+                                    <div className="mt-3 rounded-2xl border border-amber-400/20 bg-amber-400/10 p-4 text-sm text-amber-50">
+                                      <p className="font-medium text-white">
+                                        Confirmar salvamento deste resultado?
+                                      </p>
+                                      <p className="mt-1 text-amber-100/90">
+                                        Placar: {result?.homeScore ?? "-"} x{" "}
+                                        {result?.awayScore ?? "-"} ·{" "}
+                                        {result?.finished ? "Encerrado" : "Agendado"}
+                                      </p>
+                                      <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                                        <button
+                                          type="button"
+                                          onClick={() => persistOfficialResult(game.id)}
+                                          className="inline-flex flex-1 items-center justify-center rounded-2xl border border-emerald-400/25 bg-emerald-400/15 px-4 py-3 font-medium text-emerald-100 transition hover:bg-emerald-400/20"
+                                        >
+                                          Confirmar e salvar no banco
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => setConfirmingOfficialGameId(null)}
+                                          className="inline-flex flex-1 items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-3 font-medium text-white transition hover:bg-white/10"
+                                        >
+                                          Cancelar
+                                        </button>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+
+                          <StandingsTable standings={standingsByGroup[group.id]} />
+                        </div>
+                      </DashboardAccordion>
+                    ))}
+                  </div>
+                </SectionCard>
+
+                <SectionCard
+                  title="Mata-mata"
+                  subtitle="Resultados oficiais do round of 32 ate a final"
+                  icon={<GitBranch className="h-6 w-6" />}
+                >
+                  <div className="space-y-6">
+                    {Object.entries(knockoutByRound).map(([roundLabel, games]) => (
+                      <div
+                        key={roundLabel}
+                        className="min-w-0 space-y-4 rounded-3xl border border-white/8 bg-black/20 p-4"
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <h3 className="text-lg font-semibold text-white">{roundLabel}</h3>
+                            <p className="text-sm text-slate-400">
+                              Os confrontos aparecem automaticamente conforme a classificacao.
+                            </p>
+                          </div>
+                          <span className="rounded-full bg-white/5 px-3 py-1 text-xs text-slate-400">
+                            {games.length} jogos
+                          </span>
+                        </div>
+
+                        <div className="grid min-w-0 gap-3 md:grid-cols-2">
+                          {games.map((game) => {
+                            const result = state.results.find((item) => item.gameId === game.id);
+
+                            return (
+                              <div
+                                key={game.id}
+                                className="rounded-3xl border border-white/8 bg-slate-950/30 p-4"
+                              >
+                                <div className="flex flex-wrap items-start justify-between gap-3">
+                                  <div>
+                                    <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
+                                      Jogo {game.matchNumber}
+                                    </p>
+                                    <div className="mt-2 space-y-1 font-semibold text-white">
+                                      <div>
+                                        <TeamLabel team={game.homeTeam} fallback="A definir" />
+                                      </div>
+                                      <div>
+                                        <TeamLabel team={game.awayTeam} fallback="A definir" />
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <label className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-300">
+                                    <input
+                                      type="checkbox"
+                                      checked={result?.finished ?? false}
+                                      onChange={(event) =>
+                                        handleResultFinished(game.id, event.target.checked)
+                                      }
+                                    />
+                                    Encerrado
+                                  </label>
+                                </div>
+
+                                <div className="mt-4 grid grid-cols-[1fr_auto_1fr] gap-3">
+                                  <input
+                                    type="number"
+                                    inputMode="numeric"
+                                    min={0}
+                                    max={99}
+                                    value={result?.homeScore ?? ""}
+                                    onChange={(event) =>
+                                      handleResultChange(game.id, "homeScore", event.target.value)
+                                    }
+                                    className="rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-center text-lg font-semibold text-white outline-none transition focus:border-emerald-400/60"
+                                  />
+                                  <div className="flex items-center justify-center text-xl text-slate-500">
+                                    x
+                                  </div>
+                                  <input
+                                    type="number"
+                                    inputMode="numeric"
+                                    min={0}
+                                    max={99}
+                                    value={result?.awayScore ?? ""}
+                                    onChange={(event) =>
+                                      handleResultChange(game.id, "awayScore", event.target.value)
+                                    }
+                                    className="rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-center text-lg font-semibold text-white outline-none transition focus:border-emerald-400/60"
+                                  />
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setConfirmingOfficialGameId(game.id);
+                                    setAdminResultError("");
+                                    setAdminResultFeedback("");
+                                  }}
+                                  disabled={isSavingOfficialResult && savingOfficialGameId === game.id}
+                                  className="mt-4 inline-flex w-full items-center justify-center rounded-2xl border border-emerald-400/25 bg-emerald-400/10 px-4 py-3 text-sm font-medium text-emerald-100 transition hover:bg-emerald-400/15 disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                  {isSavingOfficialResult && savingOfficialGameId === game.id
+                                    ? "Salvando..."
+                                    : "Salvar resultado"}
+                                </button>
+
+                                {confirmingOfficialGameId === game.id && (
+                                  <div className="mt-3 rounded-2xl border border-amber-400/20 bg-amber-400/10 p-4 text-sm text-amber-50">
+                                    <p className="font-medium text-white">
+                                      Confirmar salvamento deste resultado?
+                                    </p>
+                                    <p className="mt-1 text-amber-100/90">
+                                      Placar: {result?.homeScore ?? "-"} x{" "}
+                                      {result?.awayScore ?? "-"} ·{" "}
+                                      {result?.finished ? "Encerrado" : "Agendado"}
+                                    </p>
+                                    <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                                      <button
+                                        type="button"
+                                        onClick={() => persistOfficialResult(game.id)}
+                                        className="inline-flex flex-1 items-center justify-center rounded-2xl border border-emerald-400/25 bg-emerald-400/15 px-4 py-3 font-medium text-emerald-100 transition hover:bg-emerald-400/20"
+                                      >
+                                        Confirmar e salvar no banco
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setConfirmingOfficialGameId(null)}
+                                        className="inline-flex flex-1 items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-3 font-medium text-white transition hover:bg-white/10"
+                                      >
+                                        Cancelar
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="mt-6 grid gap-4 lg:grid-cols-2">
+                    <div className="rounded-3xl border border-white/8 bg-black/20 p-4">
+                      <div className="flex items-center gap-3">
+                        <Crown className="h-5 w-5 text-amber-300" />
+                        <h3 className="text-lg font-semibold text-white">Oficial da Copa</h3>
+                      </div>
+                      <label className="mt-4 block">
+                        <span className="text-sm text-slate-400">Campeao oficial</span>
+                        <input
+                          type="text"
+                          value={state.awards.champion ?? ""}
+                          onChange={(event) =>
+                            setState((currentState) => ({
+                              ...currentState,
+                              awards: {
+                                ...currentState.awards,
+                                champion: event.target.value || null,
+                              },
+                            }))
+                          }
+                          placeholder="Ex.: Brasil"
+                          className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-white outline-none transition focus:border-amber-300/60"
+                        />
+                      </label>
+
+                      <label className="mt-4 block">
+                        <span className="text-sm text-slate-400">Artilheiro oficial</span>
+                        <input
+                          type="text"
+                          value={state.awards.topScorer ?? ""}
+                          onChange={(event) =>
+                            setState((currentState) => ({
+                              ...currentState,
+                              awards: {
+                                ...currentState.awards,
+                                topScorer: event.target.value || null,
+                              },
+                            }))
+                          }
+                          placeholder="Ex.: Mbappe"
+                          className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-white outline-none transition focus:border-sky-300/60"
+                        />
+                      </label>
+                    </div>
+
+                    <div className="rounded-3xl border border-white/8 bg-black/20 p-4">
+                      <p className="text-sm font-semibold text-white">Acoes da demo</p>
+                      <button
+                        type="button"
+                        onClick={resetDemoData}
+                        className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 font-medium text-white transition hover:bg-white/10"
+                      >
+                        <RotateCcw className="h-4 w-4" />
+                        Restaurar massa inicial
+                      </button>
+                    </div>
+                  </div>
+                </SectionCard>
+
+                {canManageUsers && (
+                  <SectionCard
+                    title="Usuarios"
+                    subtitle="Controle quem e moderador e quem e usuario comum"
+                    icon={<UserCircle2 className="h-6 w-6" />}
+                  >
+                    <div className="rounded-2xl border border-white/8 bg-black/20 p-4 text-sm text-slate-300">
+                      Bruno permanece como admin fixo. Moderadores podem usar a pagina de admin para lancar resultados oficiais.
+                    </div>
+
+                    {userRoleFeedback && (
+                      <div className="mt-4 rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4 text-sm text-emerald-100">
+                        {userRoleFeedback}
+                      </div>
+                    )}
+
+                    {userRoleError && (
+                      <div className="mt-4 rounded-2xl border border-rose-400/20 bg-rose-400/10 p-4 text-sm text-rose-100">
+                        {userRoleError}
+                      </div>
+                    )}
+
+                    <div className="mt-6 space-y-3">
+                      {[...participantList]
+                        .sort((left, right) => left.name.localeCompare(right.name, "pt-BR"))
+                        .map((participant) => {
+                          const isFixedAdmin =
+                            participant.name.trim().toLowerCase() === "bruno";
+                          const draftRole = isFixedAdmin
+                            ? "admin"
+                            : (roleDrafts[participant.id] ?? participant.role);
+
+                          return (
+                            <div
+                              key={participant.id}
+                              className="rounded-2xl border border-white/8 bg-black/20 p-4"
+                            >
+                              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                                <div>
+                                  <p className="font-semibold text-white">{participant.name}</p>
+                                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                                    <RoleBadge role={participant.role} />
+                                    {selectedUserId === participant.id && (
+                                      <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs font-medium text-emerald-100">
+                                        Usuario ativo
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                                  <select
+                                    value={draftRole}
+                                    disabled={isFixedAdmin || (isSavingUserRole && savingRoleUserId === participant.id)}
+                                    onChange={(event) =>
+                                      handleUserRoleDraftChange(
+                                        participant.id,
+                                        event.target.value as AppUserRole,
+                                      )
+                                    }
+                                    className="rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm text-white outline-none transition focus:border-emerald-400/60 disabled:cursor-not-allowed disabled:opacity-60"
+                                  >
+                                    <option value="user">Usuario</option>
+                                    <option value="moderator">Moderador</option>
+                                    <option value="admin">Admin</option>
+                                  </select>
+
+                                  {isFixedAdmin ? (
+                                    <span className="rounded-2xl border border-amber-300/20 bg-amber-300/10 px-4 py-3 text-sm font-medium text-amber-100">
+                                      Admin fixo
+                                    </span>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => persistUserRole(participant.id)}
+                                      disabled={isSavingUserRole && savingRoleUserId === participant.id}
+                                      className="rounded-2xl border border-emerald-400/25 bg-emerald-400/10 px-4 py-3 text-sm font-medium text-emerald-100 transition hover:bg-emerald-400/15 disabled:cursor-not-allowed disabled:opacity-60"
+                                    >
+                                      {isSavingUserRole && savingRoleUserId === participant.id
+                                        ? "Salvando..."
+                                        : "Salvar papel"}
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  </SectionCard>
+                )}
+              </div>
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {isCreateParticipantOpen && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm"
+            >
+              <motion.div
+                initial={{ opacity: 0, y: 14, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 14, scale: 0.98 }}
+                transition={{ duration: 0.2, ease: "easeOut" }}
+                className="glass-surface w-full max-w-md rounded-3xl p-5"
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-semibold uppercase tracking-[0.22em] text-emerald-300/80">
+                      Novo Participante
+                    </p>
+                    <h3 className="mt-2 text-xl font-semibold text-white">
+                      Cadastro rapido para entrar no bolao
+                    </h3>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={closeCreateParticipantCard}
+                    className="rounded-2xl border border-white/10 bg-white/5 p-2 text-slate-300 transition hover:bg-white/10 active:scale-95"
+                    aria-label="Fechar cadastro"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+
+                <div className="mt-5 space-y-4">
+                  <label className="block">
+                    <span className="text-sm text-slate-300">Nome do participante</span>
+                    <input
+                      type="text"
+                      autoFocus
+                      value={newParticipantName}
+                      onChange={(event) => {
+                        setNewParticipantName(event.target.value);
+                        if (participantFormError) {
+                          setParticipantFormError("");
+                        }
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          handleCreateParticipant();
+                        }
+                      }}
+                      placeholder="Ex.: Marcelo"
+                      className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none transition focus:border-emerald-400/60"
+                    />
+                  </label>
+
+                  <div className="rounded-2xl border border-white/8 bg-white/5 p-4 text-sm text-slate-300">
+                    Ao salvar, o novo participante entra imediatamente no acesso, no ranking e no fluxo completo de palpites.
+                  </div>
+
+                  {participantFormError && (
+                    <div className="rounded-2xl border border-rose-400/20 bg-rose-400/10 p-3 text-sm text-rose-100">
+                      {participantFormError}
+                    </div>
+                  )}
+
+                  {participantFormSuccess && (
+                    <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-3 text-sm text-emerald-100">
+                      {participantFormSuccess}
+                    </div>
+                  )}
+
+                  <div className="flex flex-col gap-3 sm:flex-row">
+                    <button
+                      type="button"
+                      onClick={closeCreateParticipantCard}
+                      className="flex-1 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 font-medium text-white transition hover:bg-white/10 active:scale-95"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCreateParticipant}
+                      disabled={isSavingParticipant}
+                      className="flex-1 rounded-2xl border border-emerald-400/20 bg-emerald-400/15 px-4 py-3 font-medium text-emerald-100 transition hover:bg-emerald-400/20 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {isSavingParticipant ? "Salvando..." : "Salvar participante"}
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
         </AnimatePresence>
       </div>
     </main>

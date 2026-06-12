@@ -4,12 +4,20 @@ import { revalidatePath } from "next/cache";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 
 import { getDb } from "@/db";
-import { guesses, matches, officialResults, users } from "@/db/schema";
+import {
+  appGuesses,
+  appSpecialPicks,
+  guesses,
+  matches,
+  officialResults,
+  users,
+} from "@/db/schema";
 import {
   getPredictionHits,
   roundDownCurrency,
   sharedPotContribution,
 } from "@/lib/tournamentEngine";
+import type { AppUserRole, SpecialPick } from "@/types/bolao";
 
 type SaveGuessInput = {
   userId: string;
@@ -31,6 +39,24 @@ type SaveOfficialAppResultInput = {
   homeScore: number | null;
   awayScore: number | null;
   finished: boolean;
+};
+
+type SaveAppGuessInput = {
+  userId: string;
+  gameId: string;
+  homeScore: number | null;
+  awayScore: number | null;
+};
+
+type SaveAppSpecialPickInput = {
+  userId: string;
+  champion: string;
+  topScorer: string;
+};
+
+type UpdateUserRoleInput = {
+  name: string;
+  role: AppUserRole;
 };
 
 const db = getDb();
@@ -351,6 +377,117 @@ export async function saveOfficialAppResultAction(input: SaveOfficialAppResultIn
   };
 }
 
+export async function saveAppGuessAction(input: SaveAppGuessInput) {
+  if (input.homeScore === null || input.awayScore === null) {
+    throw new Error("Informe os dois placares para salvar o palpite.");
+  }
+
+  const homeScore = normalizeScore(input.homeScore);
+  const awayScore = normalizeScore(input.awayScore);
+
+  await db
+    .insert(appGuesses)
+    .values({
+      gameId: input.gameId,
+      userId: input.userId,
+      homeScore,
+      awayScore,
+    })
+    .onConflictDoUpdate({
+      target: [appGuesses.userId, appGuesses.gameId],
+      set: {
+        homeScore,
+        awayScore,
+        updatedAt: new Date(),
+      },
+    });
+
+  revalidatePath("/");
+
+  return {
+    ok: true,
+    prediction: {
+      userId: input.userId,
+      gameId: input.gameId,
+      homeScore,
+      awayScore,
+      updatedAt: new Date().toISOString(),
+    },
+  };
+}
+
+export async function saveAppSpecialPickAction(input: SaveAppSpecialPickInput) {
+  const champion = input.champion.trim();
+  const topScorer = input.topScorer.trim();
+
+  await db
+    .insert(appSpecialPicks)
+    .values({
+      userId: input.userId,
+      champion,
+      topScorer,
+    })
+    .onConflictDoUpdate({
+      target: appSpecialPicks.userId,
+      set: {
+        champion,
+        topScorer,
+        updatedAt: new Date(),
+      },
+    });
+
+  revalidatePath("/");
+
+  return {
+    ok: true,
+    specialPick: {
+      userId: input.userId,
+      champion,
+      topScorer,
+      updatedAt: new Date().toISOString(),
+    },
+  };
+}
+
+export async function syncAppSpecialPicksAction(picks: SpecialPick[]) {
+  const sanitizedPicks = picks
+    .map((pick) => ({
+      userId: pick.userId.trim(),
+      champion: pick.champion.trim(),
+      topScorer: pick.topScorer.trim(),
+    }))
+    .filter(
+      (pick) =>
+        pick.userId &&
+        (pick.champion.length > 0 || pick.topScorer.length > 0),
+    );
+
+  if (!sanitizedPicks.length) {
+    return { ok: true, synced: 0 };
+  }
+
+  for (const pick of sanitizedPicks) {
+    await db
+      .insert(appSpecialPicks)
+      .values(pick)
+      .onConflictDoUpdate({
+        target: appSpecialPicks.userId,
+        set: {
+          champion: pick.champion,
+          topScorer: pick.topScorer,
+          updatedAt: new Date(),
+        },
+      });
+  }
+
+  revalidatePath("/");
+
+  return {
+    ok: true,
+    synced: sanitizedPicks.length,
+  };
+}
+
 export async function getFinancialLeaderboardAction() {
   return db
     .select({
@@ -426,6 +563,39 @@ export async function seedUsersIfMissingAction(
       inserted: missing.length,
     };
   });
+}
+
+export async function updateUserRoleAction(input: UpdateUserRoleInput) {
+  const normalizedName = input.name.trim();
+
+  if (!normalizedName) {
+    throw new Error("Usuario invalido.");
+  }
+
+  if (normalizedName.toLowerCase() === "bruno") {
+    input.role = "admin";
+  }
+
+  const [updatedUser] = await db
+    .update(users)
+    .set({ role: input.role })
+    .where(eq(users.name, normalizedName))
+    .returning({
+      id: users.id,
+      name: users.name,
+      role: users.role,
+    });
+
+  if (!updatedUser) {
+    throw new Error("Usuario nao encontrado para atualizar o papel.");
+  }
+
+  revalidatePath("/");
+
+  return {
+    ok: true,
+    user: updatedUser,
+  };
 }
 
 export async function getUsersForGuessesAction(userIds: string[]) {

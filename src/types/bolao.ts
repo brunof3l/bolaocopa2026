@@ -42,7 +42,10 @@ export type Participant = {
   id: string;
   name: string;
   accentColor: string;
+  role: AppUserRole;
 };
+
+export type AppUserRole = "admin" | "moderator" | "user";
 
 export type TeamSlotSource =
   | {
@@ -96,6 +99,7 @@ export type SpecialPick = {
   userId: string;
   champion: string;
   topScorer: string;
+  updatedAt?: string;
 };
 
 export type MatchResult = {
