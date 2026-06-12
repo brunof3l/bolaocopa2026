@@ -33,6 +33,7 @@ import {
   seedUsersIfMissingAction,
   syncAppSpecialPicksAction,
   updateUserRoleAction,
+  verifyPrivilegedAccessAction,
 } from "@/app/actions/match-actions";
 import { BolaoNav } from "@/components/bolao-nav";
 import { CountryFlag } from "@/components/country-flag";
@@ -88,6 +89,7 @@ type RemoteAppUser = { name: string; role: AppUserRole };
 const LOCAL_STORAGE_PARTICIPANTS_KEY = "bolao-copa-2026-participants";
 const LOCAL_STORAGE_STATE_KEY = "bolao-copa-2026-app-state";
 const LOCAL_STORAGE_SELECTED_USER_KEY = "bolao-copa-2026-selected-user";
+const LOCAL_STORAGE_PRIVILEGED_ACCESS_KEY = "bolao-copa-2026-privileged-access";
 const participantAccentPalette = [
   "#10b981",
   "#0ea5e9",
@@ -215,6 +217,10 @@ function resolveParticipantRole(
   }
 
   return remoteRole ?? "user";
+}
+
+function isPrivilegedRole(role: AppUserRole) {
+  return role === "admin" || role === "moderator";
 }
 
 function mergeParticipants(
@@ -1090,6 +1096,27 @@ export function BolaoApp({
       return null;
     }
   });
+  const [verifiedPrivilegedAccess, setVerifiedPrivilegedAccess] = useState<Record<string, boolean>>(
+    () => {
+      if (typeof window === "undefined") {
+        return {};
+      }
+
+      try {
+        const rawAccess = window.localStorage.getItem(LOCAL_STORAGE_PRIVILEGED_ACCESS_KEY);
+
+        if (!rawAccess) {
+          return {};
+        }
+
+        const parsedAccess = JSON.parse(rawAccess) as Record<string, boolean>;
+
+        return parsedAccess && typeof parsedAccess === "object" ? parsedAccess : {};
+      } catch {
+        return {};
+      }
+    },
+  );
   const [openAdminSection, setOpenAdminSection] = useState<string | null>(
     "admin-group-A",
   );
@@ -1098,6 +1125,7 @@ export function BolaoApp({
   const [participantFormError, setParticipantFormError] = useState("");
   const [participantFormSuccess, setParticipantFormSuccess] = useState("");
   const [isSavingParticipant, startSavingParticipant] = useTransition();
+  const [isVerifyingPrivilegedAccess, startVerifyingPrivilegedAccess] = useTransition();
   const [isSavingOfficialResult, startSavingOfficialResult] = useTransition();
   const [isSavingPrediction, startSavingPrediction] = useTransition();
   const [savingOfficialGameId, setSavingOfficialGameId] = useState<string | null>(null);
@@ -1119,6 +1147,11 @@ export function BolaoApp({
   const [isSavingSpecialPick, startSavingSpecialPick] = useTransition();
   const [specialPickFeedback, setSpecialPickFeedback] = useState("");
   const [specialPickError, setSpecialPickError] = useState("");
+  const [pendingPrivilegedParticipantId, setPendingPrivilegedParticipantId] = useState<
+    string | null
+  >(null);
+  const [privilegedPassword, setPrivilegedPassword] = useState("");
+  const [privilegedAccessError, setPrivilegedAccessError] = useState("");
   const [roleDraftOverrides, setRoleDraftOverrides] = useState<Record<string, AppUserRole>>(() =>
     Object.fromEntries(participants.map((participant) => [participant.id, participant.role])),
   );
@@ -1129,8 +1162,17 @@ export function BolaoApp({
   const didSyncInitialSpecialPicksRef = useRef(false);
 
   const now = new Date();
-  const selectedParticipant =
+  const rawSelectedParticipant =
     participantList.find((participant) => participant.id === selectedUserId) ?? null;
+  const selectedParticipant =
+    rawSelectedParticipant &&
+    (!isPrivilegedRole(rawSelectedParticipant.role) ||
+      verifiedPrivilegedAccess[rawSelectedParticipant.id] === true)
+      ? rawSelectedParticipant
+      : null;
+  const pendingPrivilegedParticipant =
+    participantList.find((participant) => participant.id === pendingPrivilegedParticipantId) ??
+    null;
   const effectiveSelectedUserId = selectedParticipant?.id ?? null;
   const isLoggedIn = Boolean(selectedParticipant);
   const currentUserRole = selectedParticipant?.role ?? null;
@@ -1324,6 +1366,23 @@ export function BolaoApp({
       // Ignora indisponibilidade do storage para manter a tela funcional.
     }
   }, [selectedUserId]);
+
+  useEffect(() => {
+    try {
+      const hasAnyVerifiedAccess = Object.values(verifiedPrivilegedAccess).some(Boolean);
+
+      if (hasAnyVerifiedAccess) {
+        window.localStorage.setItem(
+          LOCAL_STORAGE_PRIVILEGED_ACCESS_KEY,
+          JSON.stringify(verifiedPrivilegedAccess),
+        );
+      } else {
+        window.localStorage.removeItem(LOCAL_STORAGE_PRIVILEGED_ACCESS_KEY);
+      }
+    } catch {
+      // Ignora indisponibilidade do storage para manter a tela funcional.
+    }
+  }, [verifiedPrivilegedAccess]);
 
   const groupGamesMap = useMemo(
     () =>
@@ -1716,14 +1775,81 @@ export function BolaoApp({
   }
 
   function handleLogin(participantId: string) {
-    setSelectedUserId(participantId);
+    const participant = participantList.find((item) => item.id === participantId);
+
+    if (!participant) {
+      return;
+    }
+
+    setUserRoleError("");
+    setUserRoleFeedback("");
+    setPrivilegedAccessError("");
+
+    if (isPrivilegedRole(participant.role) && !verifiedPrivilegedAccess[participant.id]) {
+      setPendingPrivilegedParticipantId(participant.id);
+      setPrivilegedPassword("");
+      return;
+    }
+
+    setPendingPrivilegedParticipantId(null);
     setUserRoleError("");
     setUserRoleFeedback("");
     router.push("/");
+    setSelectedUserId(participantId);
+  }
+
+  function cancelPrivilegedLogin() {
+    setPendingPrivilegedParticipantId(null);
+    setPrivilegedPassword("");
+    setPrivilegedAccessError("");
+  }
+
+  function submitPrivilegedLogin() {
+    if (!pendingPrivilegedParticipant || !isPrivilegedRole(pendingPrivilegedParticipant.role)) {
+      return;
+    }
+
+    const privilegedRole = pendingPrivilegedParticipant.role;
+    setPrivilegedAccessError("");
+
+    startVerifyingPrivilegedAccess(async () => {
+      try {
+        await verifyPrivilegedAccessAction({
+          role: privilegedRole,
+          password: privilegedPassword,
+        });
+
+        setVerifiedPrivilegedAccess((currentAccess) => ({
+          ...currentAccess,
+          [pendingPrivilegedParticipant.id]: true,
+        }));
+        setSelectedUserId(pendingPrivilegedParticipant.id);
+        setPendingPrivilegedParticipantId(null);
+        setPrivilegedPassword("");
+        router.push("/");
+      } catch (error) {
+        setPrivilegedAccessError(
+          error instanceof Error
+            ? error.message
+            : "Nao foi possivel validar a senha deste perfil.",
+        );
+      }
+    });
   }
 
   function handleLogout() {
+    if (selectedParticipant && isPrivilegedRole(selectedParticipant.role)) {
+      setVerifiedPrivilegedAccess((currentAccess) => {
+        const nextAccess = { ...currentAccess };
+        delete nextAccess[selectedParticipant.id];
+        return nextAccess;
+      });
+    }
+
     setSelectedUserId(null);
+    setPendingPrivilegedParticipantId(null);
+    setPrivilegedPassword("");
+    setPrivilegedAccessError("");
     setConfirmingPredictionGameId(null);
     setPredictionFeedbackGameId(null);
     setPredictionFeedback("");
@@ -1805,6 +1931,10 @@ export function BolaoApp({
     });
     setParticipantList(mergeParticipants(participants, initialRemoteUsers));
     setSelectedUserId(null);
+    setVerifiedPrivilegedAccess({});
+    setPendingPrivilegedParticipantId(null);
+    setPrivilegedPassword("");
+    setPrivilegedAccessError("");
     setIsCreateParticipantOpen(false);
     setParticipantFormError("");
     setParticipantFormSuccess("");
@@ -2070,7 +2200,8 @@ export function BolaoApp({
 
                   <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     {participantList.map((participant) => {
-                      const isActive = participant.id === selectedUserId;
+                      const isActive = participant.id === effectiveSelectedUserId;
+                      const requiresPassword = isPrivilegedRole(participant.role);
 
                       return (
                         <button
@@ -2098,7 +2229,11 @@ export function BolaoApp({
                             <div className="min-w-0 flex-1">
                               <p className="font-semibold text-white">{participant.name}</p>
                               <p className="mt-1 text-xs text-slate-400">
-                                {isActive ? "Usuario ativo" : "Entrar no sistema"}
+                                {isActive
+                                  ? "Usuario ativo"
+                                  : requiresPassword
+                                    ? "Senha obrigatoria"
+                                    : "Entrar no sistema"}
                               </p>
                               <div className="mt-3">
                                 <RoleBadge role={participant.role} />
@@ -2110,9 +2245,59 @@ export function BolaoApp({
                     })}
                   </div>
 
+                  {pendingPrivilegedParticipant && (
+                    <div className="mt-5 rounded-2xl border border-amber-300/20 bg-amber-300/10 p-4 text-sm text-amber-50">
+                      <p className="font-medium text-white">
+                        Acesso protegido para {pendingPrivilegedParticipant.name}
+                      </p>
+                      <p className="mt-2 text-amber-100/90">
+                        Digite a senha de {getRoleLabel(pendingPrivilegedParticipant.role)} para
+                        liberar o acesso a este perfil.
+                      </p>
+
+                      <input
+                        type="password"
+                        autoFocus
+                        value={privilegedPassword}
+                        onChange={(event) => setPrivilegedPassword(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            submitPrivilegedLogin();
+                          }
+                        }}
+                        placeholder="Digite a senha"
+                        className="mt-4 w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-white outline-none transition focus:border-amber-300/60"
+                      />
+
+                      {privilegedAccessError && (
+                        <div className="mt-3 rounded-2xl border border-rose-400/20 bg-rose-400/10 p-3 text-xs text-rose-100">
+                          {privilegedAccessError}
+                        </div>
+                      )}
+
+                      <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                        <button
+                          type="button"
+                          onClick={submitPrivilegedLogin}
+                          disabled={isVerifyingPrivilegedAccess}
+                          className="inline-flex flex-1 items-center justify-center rounded-2xl border border-emerald-400/25 bg-emerald-400/15 px-4 py-3 font-medium text-emerald-100 transition hover:bg-emerald-400/20 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {isVerifyingPrivilegedAccess ? "Validando..." : "Entrar com senha"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={cancelPrivilegedLogin}
+                          className="inline-flex flex-1 items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-3 font-medium text-white transition hover:bg-white/10"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="mt-5 rounded-2xl border border-white/8 bg-black/20 p-4 text-sm text-slate-300">
-                    O login e simples: basta selecionar seu nome para liberar as paginas
-                    conforme o papel cadastrado.
+                    Usuarios comuns entram apenas selecionando o nome. Perfis de admin e
+                    moderador pedem senha para evitar que qualquer pessoa mexa no sistema.
                   </div>
 
                   <div className="mt-5">
@@ -2489,6 +2674,25 @@ export function BolaoApp({
           ) : currentPage === "admin" ? (
             <motion.div key="tab-admin" {...tabTransition}>
               <div className="space-y-6">
+                {canManageUsers && (
+                  <SectionCard
+                    title="Controle"
+                    subtitle="Defina quem e moderador e quem permanece como usuario"
+                    icon={<UserCircle2 className="h-6 w-6" />}
+                  >
+                    <div className="rounded-2xl border border-white/8 bg-black/20 p-4 text-sm text-slate-300">
+                      Esta area fica disponivel somente para o admin. Use o botao abaixo para
+                      ir direto ao controle de usuarios.
+                    </div>
+                    <a
+                      href="#controle-usuarios"
+                      className="mt-4 inline-flex w-full items-center justify-center rounded-2xl border border-emerald-400/25 bg-emerald-400/10 px-4 py-3 font-medium text-emerald-100 transition hover:bg-emerald-400/15"
+                    >
+                      Abrir controle de usuarios
+                    </a>
+                  </SectionCard>
+                )}
+
                 <SectionCard
                   title="Administracao"
                   subtitle="Resultados oficiais da fase de grupos"
@@ -2842,11 +3046,12 @@ export function BolaoApp({
                 </SectionCard>
 
                 {canManageUsers && (
-                  <SectionCard
-                    title="Usuarios"
-                    subtitle="Controle quem e moderador e quem e usuario comum"
-                    icon={<UserCircle2 className="h-6 w-6" />}
-                  >
+                  <div id="controle-usuarios">
+                    <SectionCard
+                      title="Usuarios"
+                      subtitle="Controle quem e moderador e quem e usuario comum"
+                      icon={<UserCircle2 className="h-6 w-6" />}
+                    >
                     <div className="rounded-2xl border border-white/8 bg-black/20 p-4 text-sm text-slate-300">
                       Bruno permanece como admin fixo. Moderadores podem usar a pagina de admin para lancar resultados oficiais.
                     </div>
@@ -2905,7 +3110,6 @@ export function BolaoApp({
                                   >
                                     <option value="user">Usuario</option>
                                     <option value="moderator">Moderador</option>
-                                    <option value="admin">Admin</option>
                                   </select>
 
                                   {isFixedAdmin ? (
@@ -2930,7 +3134,8 @@ export function BolaoApp({
                           );
                         })}
                     </div>
-                  </SectionCard>
+                    </SectionCard>
+                  </div>
                 )}
               </div>
             </motion.div>

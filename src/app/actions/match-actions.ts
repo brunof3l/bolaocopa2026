@@ -59,8 +59,15 @@ type UpdateUserRoleInput = {
   role: AppUserRole;
 };
 
+type VerifyPrivilegedAccessInput = {
+  role: "admin" | "moderator";
+  password: string;
+};
+
 const db = getDb();
 const guessCloseWindowMs = 60 * 1000;
+const DEFAULT_ADMIN_ACCESS_PASSWORD = "Bruno@2026";
+const DEFAULT_MODERATOR_ACCESS_PASSWORD = "Moderador@2026";
 
 function normalizeScore(value: number) {
   if (!Number.isFinite(value) || value < 0) {
@@ -88,6 +95,16 @@ function canEditGuess(matchDate: Date, bypassWindow = false) {
 
 function roundCurrency(value: number) {
   return Number(value.toFixed(2));
+}
+
+function getPrivilegedAccessPassword(role: "admin" | "moderator") {
+  if (role === "admin") {
+    return process.env.ADMIN_ACCESS_PASSWORD?.trim() || DEFAULT_ADMIN_ACCESS_PASSWORD;
+  }
+
+  return (
+    process.env.MODERATOR_ACCESS_PASSWORD?.trim() || DEFAULT_MODERATOR_ACCESS_PASSWORD
+  );
 }
 
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -595,6 +612,26 @@ export async function updateUserRoleAction(input: UpdateUserRoleInput) {
   return {
     ok: true,
     user: updatedUser,
+  };
+}
+
+export async function verifyPrivilegedAccessAction(
+  input: VerifyPrivilegedAccessInput,
+) {
+  const password = input.password.trim();
+
+  if (!password) {
+    throw new Error("Informe a senha para acessar este perfil.");
+  }
+
+  const expectedPassword = getPrivilegedAccessPassword(input.role);
+
+  if (password !== expectedPassword) {
+    throw new Error("Senha incorreta para este perfil.");
+  }
+
+  return {
+    ok: true,
   };
 }
 
