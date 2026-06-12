@@ -883,6 +883,21 @@ export function BolaoApp({
   );
   const championWinners = ranking.filter((entry) => entry.championHit);
   const topScorerWinners = ranking.filter((entry) => entry.topScorerHit);
+  const currentRollover = useMemo(() => {
+    const lastGame = allResolvedGames[allResolvedGames.length - 1];
+
+    if (!lastGame) {
+      return { result: 0, goals: 0, exact: 0 };
+    }
+
+    return (
+      financeSummary.matchBreakdowns[lastGame.id]?.rolloverOut ?? {
+        result: 0,
+        goals: 0,
+        exact: 0,
+      }
+    );
+  }, [allResolvedGames, financeSummary.matchBreakdowns]);
   const firstTournamentKickoff = gamesData
     .slice()
     .sort(
@@ -1667,7 +1682,7 @@ export function BolaoApp({
               subtitle="Ganhos acumulados, premios finais e acerto de contas"
               icon={<Medal className="h-6 w-6" />}
             >
-              <div className="grid gap-4 lg:grid-cols-3">
+              <div className="grid gap-4 lg:grid-cols-4">
                 <div className="rounded-3xl border border-amber-300/15 bg-amber-300/5 p-4">
                   <p className="text-sm text-amber-100/80">Lider em cravos</p>
                   <p className="mt-2 text-lg font-semibold text-white">
@@ -1700,6 +1715,32 @@ export function BolaoApp({
                   <p className="mt-1 text-xs text-slate-400">
                     Pote final: {formatCurrency(financeSummary.finalAwards.topScorerPot)}
                   </p>
+                </div>
+                <div className="rounded-3xl border border-fuchsia-300/15 bg-fuchsia-300/5 p-4">
+                  <div className="flex items-center gap-2 text-fuchsia-100/80">
+                    <RotateCcw className="h-4 w-4" />
+                    <p className="text-sm">Acumulado Atual</p>
+                  </div>
+                  <div className="mt-3 space-y-2 text-sm text-slate-200">
+                    <p>
+                      Resultado:{" "}
+                      <span className="font-semibold text-white">
+                        {formatCurrency(currentRollover.result)}
+                      </span>
+                    </p>
+                    <p>
+                      Gols:{" "}
+                      <span className="font-semibold text-white">
+                        {formatCurrency(currentRollover.goals)}
+                      </span>
+                    </p>
+                    <p>
+                      Placar Exato:{" "}
+                      <span className="font-semibold text-white">
+                        {formatCurrency(currentRollover.exact)}
+                      </span>
+                    </p>
+                  </div>
                 </div>
               </div>
 
