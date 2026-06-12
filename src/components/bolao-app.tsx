@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -1897,6 +1897,12 @@ export function BolaoApp({
           role: nextRole,
         });
 
+        if (!response.ok || !response.user) {
+          setUserRoleError(response.error || "Nao foi possivel atualizar o papel do usuario.");
+          setUserRoleFeedback("");
+          return;
+        }
+
         setParticipantList((currentParticipants) =>
           currentParticipants.map((currentParticipant) =>
             currentParticipant.id === participantId
@@ -1918,7 +1924,7 @@ export function BolaoApp({
       } catch (error) {
         setUserRoleError(
           error instanceof Error
-            ? error.message
+            ? "Nao foi possivel atualizar o papel do usuario agora. Tente novamente."
             : "Nao foi possivel atualizar o papel do usuario.",
         );
       } finally {

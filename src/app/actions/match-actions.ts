@@ -588,36 +588,71 @@ export async function seedUsersIfMissingAction(
 }
 
 export async function updateUserRoleAction(input: UpdateUserRoleInput) {
-  const normalizedName = input.name.trim();
+  try {
+    const normalizedName = input.name.trim();
 
-  if (!normalizedName) {
-    throw new Error("Usuario invalido.");
+    if (!normalizedName) {
+      return {
+        ok: false,
+        error: "Usuario invalido.",
+        user: null,
+      };
+    }
+
+    const nextRole = normalizedName.toLowerCase() === "bruno" ? "admin" : input.role;
+
+    const [existingUser] = await db
+      .select({
+        id: users.id,
+      })
+      .from(users)
+      .where(eq(users.name, normalizedName))
+      .limit(1);
+
+    const [savedUser] = existingUser
+      ? await db
+          .update(users)
+          .set({ role: nextRole })
+          .where(eq(users.id, existingUser.id))
+          .returning({
+            id: users.id,
+            name: users.name,
+            role: users.role,
+          })
+      : await db
+          .insert(users)
+          .values({
+            name: normalizedName,
+            role: nextRole,
+          })
+          .returning({
+            id: users.id,
+            name: users.name,
+            role: users.role,
+          });
+
+    if (!savedUser) {
+      return {
+        ok: false,
+        error: "Nao foi possivel salvar o papel do usuario.",
+        user: null,
+      };
+    }
+
+    revalidatePath("/");
+
+    return {
+      ok: true,
+      error: "",
+      user: savedUser,
+    };
+  } catch {
+    return {
+      ok: false,
+      error: "Nao foi possivel salvar o papel do usuario agora. Tente novamente.",
+      user: null,
+    };
   }
-
-  if (normalizedName.toLowerCase() === "bruno") {
-    input.role = "admin";
-  }
-
-  const [updatedUser] = await db
-    .update(users)
-    .set({ role: input.role })
-    .where(eq(users.name, normalizedName))
-    .returning({
-      id: users.id,
-      name: users.name,
-      role: users.role,
-    });
-
-  if (!updatedUser) {
-    throw new Error("Usuario nao encontrado para atualizar o papel.");
-  }
-
-  revalidatePath("/");
-
-  return {
-    ok: true,
-    user: updatedUser,
-  };
 }
 
 export async function verifyPrivilegedAccessAction(
