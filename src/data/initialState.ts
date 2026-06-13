@@ -36,6 +36,28 @@ export const initialState: AppState = {
     { userId: "gustavo", gameId: "match-002", homeScore: 2, awayScore: 0, updatedAt: now },
     { userId: "sidnei", gameId: "match-002", homeScore: 0, awayScore: 1, updatedAt: now },
     { userId: "sidnei-jr", gameId: "match-002", homeScore: 1, awayScore: 2, updatedAt: now },
+
+    // Jogo 3 — Canada x Bosnia (12/06 15:00 MS)
+    { userId: "bruno", gameId: "match-007", homeScore: 2, awayScore: 0, updatedAt: now },
+    { userId: "edivaldo", gameId: "match-007", homeScore: 2, awayScore: 0, updatedAt: now },
+    { userId: "eduardo", gameId: "match-007", homeScore: 1, awayScore: 2, updatedAt: now },
+    { userId: "fernandinho", gameId: "match-007", homeScore: 1, awayScore: 2, updatedAt: now },
+    { userId: "gabriel", gameId: "match-007", homeScore: 2, awayScore: 1, updatedAt: now },
+    { userId: "geovane", gameId: "match-007", homeScore: 2, awayScore: 1, updatedAt: now },
+    { userId: "gustavo", gameId: "match-007", homeScore: 1, awayScore: 0, updatedAt: now },
+    { userId: "sidnei", gameId: "match-007", homeScore: 2, awayScore: 0, updatedAt: now },
+    { userId: "sidnei-jr", gameId: "match-007", homeScore: 0, awayScore: 2, updatedAt: now },
+
+    // Jogo 4 — Estados Unidos x Paraguai (12/06 21:00 MS)
+    { userId: "bruno", gameId: "match-019", homeScore: 3, awayScore: 2, updatedAt: now },
+    { userId: "edivaldo", gameId: "match-019", homeScore: 1, awayScore: 1, updatedAt: now },
+    { userId: "eduardo", gameId: "match-019", homeScore: 0, awayScore: 1, updatedAt: now },
+    { userId: "fernandinho", gameId: "match-019", homeScore: 1, awayScore: 2, updatedAt: now },
+    { userId: "gabriel", gameId: "match-019", homeScore: 0, awayScore: 1, updatedAt: now },
+    { userId: "geovane", gameId: "match-019", homeScore: 2, awayScore: 1, updatedAt: now },
+    { userId: "gustavo", gameId: "match-019", homeScore: 2, awayScore: 1, updatedAt: now },
+    { userId: "sidnei", gameId: "match-019", homeScore: 0, awayScore: 1, updatedAt: now },
+    { userId: "sidnei-jr", gameId: "match-019", homeScore: 0, awayScore: 1, updatedAt: now },
   ],
   specialPicks: [
     { userId: "bruno", champion: "Portugal", topScorer: "Cristiano Ronaldo" },
