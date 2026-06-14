@@ -530,46 +530,78 @@ function DashboardGameRow({
   );
 }
 
-function getGuessHitTone(
+const GUESS_DOT_GRAY = "#64748b";
+
+function getGuessStatus(
   prediction: Prediction | undefined,
   result: MatchResult | undefined,
 ) {
-  if (
-    !prediction ||
-    prediction.homeScore === null ||
-    prediction.awayScore === null ||
-    !result?.finished ||
-    result.homeScore === null ||
-    result.awayScore === null
-  ) {
-    return null;
-  }
+  const hasGuess =
+    Boolean(prediction) &&
+    prediction?.homeScore !== null &&
+    prediction?.awayScore !== null;
+  const isFinished =
+    Boolean(result?.finished) &&
+    result?.homeScore !== null &&
+    result?.awayScore !== null;
 
-  const exactHit =
-    prediction.homeScore === result.homeScore &&
-    prediction.awayScore === result.awayScore;
-
-  if (exactHit) {
-    return { label: "Cravou", className: "border-emerald-400/30 bg-emerald-400/10 text-emerald-100" };
-  }
-
-  const outcome = (home: number, away: number) =>
-    home > away ? "home" : away > home ? "away" : "draw";
-  const resultHit =
-    outcome(prediction.homeScore, prediction.awayScore) ===
-    outcome(result.homeScore, result.awayScore);
-  const goalsHit =
-    prediction.homeScore + prediction.awayScore ===
-    result.homeScore + result.awayScore;
-
-  if (resultHit || goalsHit) {
+  if (!isFinished) {
     return {
-      label: resultHit && goalsHit ? "Resultado + gols" : resultHit ? "Resultado" : "Gols",
-      className: "border-sky-400/30 bg-sky-400/10 text-sky-100",
+      hasGuess,
+      dotColor: GUESS_DOT_GRAY,
+      label: hasGuess ? "Palpite salvo" : "Aguardando palpite",
+      labelClassName: "text-slate-400",
     };
   }
 
-  return { label: "Errou", className: "border-white/10 bg-white/5 text-slate-400" };
+  if (!hasGuess || !prediction) {
+    return {
+      hasGuess,
+      dotColor: GUESS_DOT_GRAY,
+      label: "Nao palpitou",
+      labelClassName: "text-slate-500",
+    };
+  }
+
+  const home = prediction.homeScore as number;
+  const away = prediction.awayScore as number;
+  const resultHome = result?.homeScore as number;
+  const resultAway = result?.awayScore as number;
+
+  if (home === resultHome && away === resultAway) {
+    return {
+      hasGuess,
+      dotColor: "#10b981",
+      label: "Cravou",
+      labelClassName: "text-emerald-200",
+    };
+  }
+
+  const outcome = (h: number, a: number) =>
+    h > a ? "home" : a > h ? "away" : "draw";
+  const resultHit = outcome(home, away) === outcome(resultHome, resultAway);
+  const goalsHit = home + away === resultHome + resultAway;
+
+  if (resultHit || goalsHit) {
+    return {
+      hasGuess,
+      dotColor: "#f59e0b",
+      label:
+        resultHit && goalsHit
+          ? "Resultado + gols"
+          : resultHit
+            ? "Resultado"
+            : "Gols",
+      labelClassName: "text-amber-200",
+    };
+  }
+
+  return {
+    hasGuess,
+    dotColor: "#f43f5e",
+    label: "Errou",
+    labelClassName: "text-rose-300",
+  };
 }
 
 function DailyGuessesCard({
@@ -578,14 +610,12 @@ function DailyGuessesCard({
   participants,
   predictions,
   results,
-  now,
 }: {
   dayLabel: string;
   games: ResolvedGame[];
   participants: Participant[];
   predictions: Prediction[];
   results: MatchResult[];
-  now: Date;
 }) {
   return (
     <SectionCard
@@ -597,20 +627,10 @@ function DailyGuessesCard({
         <div className="space-y-4">
           {games.map((game) => {
             const result = results.find((item) => item.gameId === game.id);
-            const availability = getPredictionAvailability(game, now);
-            const isRevealed = availability.status !== "open";
             const isFinished =
               Boolean(result?.finished) &&
               result?.homeScore !== null &&
               result?.awayScore !== null;
-            const filledCount = participants.filter((participant) => {
-              const prediction = getPrediction(predictions, participant.id, game.id);
-              return (
-                prediction &&
-                prediction.homeScore !== null &&
-                prediction.awayScore !== null
-              );
-            }).length;
 
             return (
               <div
@@ -638,61 +658,56 @@ function DailyGuessesCard({
                   </div>
                 </div>
 
-                {isRevealed ? (
-                  <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                    {participants.map((participant) => {
-                      const prediction = getPrediction(
-                        predictions,
-                        participant.id,
-                        game.id,
-                      );
-                      const hasGuess =
-                        prediction &&
-                        prediction.homeScore !== null &&
-                        prediction.awayScore !== null;
-                      const tone = getGuessHitTone(prediction, result);
+                <div className="mt-4 overflow-x-auto rounded-2xl border border-white/8 bg-black/20">
+                  <table className="min-w-full text-left text-xs sm:text-sm">
+                    <thead className="bg-white/5 text-slate-300">
+                      <tr>
+                        <th className="px-3 py-2.5 font-medium">Participante</th>
+                        <th className="px-3 py-2.5 font-medium">Palpite</th>
+                        <th className="px-3 py-2.5 font-medium">Situacao</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {participants.map((participant) => {
+                        const prediction = getPrediction(
+                          predictions,
+                          participant.id,
+                          game.id,
+                        );
+                        const status = getGuessStatus(prediction, result);
 
-                      return (
-                        <div
-                          key={participant.id}
-                          className="flex items-center justify-between gap-3 rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2"
-                        >
-                          <span className="flex items-center gap-2 truncate text-sm text-slate-200">
-                            <span
-                              className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
-                              style={{ backgroundColor: participant.accentColor }}
-                            />
-                            <span className="truncate">{participant.name}</span>
-                          </span>
-                          <span className="flex items-center gap-2">
-                            {hasGuess ? (
-                              <span className="text-sm font-semibold text-white">
-                                {prediction?.homeScore} x {prediction?.awayScore}
+                        return (
+                          <tr
+                            key={participant.id}
+                            className="border-t border-white/8 text-slate-200"
+                          >
+                            <td className="px-3 py-2.5 font-medium text-white">
+                              <span className="flex items-center gap-2">
+                                <span
+                                  className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+                                  style={{ backgroundColor: status.dotColor }}
+                                />
+                                <span className="truncate">{participant.name}</span>
                               </span>
-                            ) : (
-                              <span className="text-xs text-slate-500">Sem palpite</span>
-                            )}
-                            {tone ? (
-                              <span
-                                className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${tone.className}`}
-                              >
-                                {tone.label}
-                              </span>
-                            ) : null}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="mt-4 flex items-center gap-2 rounded-xl border border-white/8 bg-black/30 px-3 py-3 text-sm text-slate-300">
-                    <Lock className="h-4 w-4 text-amber-200" />
-                    <span>
-                      Palpites ocultos ate o jogo travar. {filledCount}/{participants.length}{" "}
-                      ja palpitaram.
-                    </span>
-                  </div>
-                )}
+                            </td>
+                            <td className="px-3 py-2.5">
+                              {status.hasGuess ? (
+                                <span className="font-semibold text-white">
+                                  {prediction?.homeScore} x {prediction?.awayScore}
+                                </span>
+                              ) : (
+                                <span className="text-slate-500">Aguardando palpite</span>
+                              )}
+                            </td>
+                            <td className={`px-3 py-2.5 ${status.labelClassName}`}>
+                              {status.label}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             );
           })}
@@ -2386,7 +2401,6 @@ export function BolaoApp({
                   participants={participantList}
                   predictions={state.predictions}
                   results={state.results}
-                  now={now}
                 />
 
                 <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
