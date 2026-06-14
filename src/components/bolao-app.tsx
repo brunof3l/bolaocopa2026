@@ -530,6 +530,182 @@ function DashboardGameRow({
   );
 }
 
+function getGuessHitTone(
+  prediction: Prediction | undefined,
+  result: MatchResult | undefined,
+) {
+  if (
+    !prediction ||
+    prediction.homeScore === null ||
+    prediction.awayScore === null ||
+    !result?.finished ||
+    result.homeScore === null ||
+    result.awayScore === null
+  ) {
+    return null;
+  }
+
+  const exactHit =
+    prediction.homeScore === result.homeScore &&
+    prediction.awayScore === result.awayScore;
+
+  if (exactHit) {
+    return { label: "Cravou", className: "border-emerald-400/30 bg-emerald-400/10 text-emerald-100" };
+  }
+
+  const outcome = (home: number, away: number) =>
+    home > away ? "home" : away > home ? "away" : "draw";
+  const resultHit =
+    outcome(prediction.homeScore, prediction.awayScore) ===
+    outcome(result.homeScore, result.awayScore);
+  const goalsHit =
+    prediction.homeScore + prediction.awayScore ===
+    result.homeScore + result.awayScore;
+
+  if (resultHit || goalsHit) {
+    return {
+      label: resultHit && goalsHit ? "Resultado + gols" : resultHit ? "Resultado" : "Gols",
+      className: "border-sky-400/30 bg-sky-400/10 text-sky-100",
+    };
+  }
+
+  return { label: "Errou", className: "border-white/10 bg-white/5 text-slate-400" };
+}
+
+function DailyGuessesCard({
+  dayLabel,
+  games,
+  participants,
+  predictions,
+  results,
+  now,
+}: {
+  dayLabel: string;
+  games: ResolvedGame[];
+  participants: Participant[];
+  predictions: Prediction[];
+  results: MatchResult[];
+  now: Date;
+}) {
+  return (
+    <SectionCard
+      title="Palpites do Dia"
+      subtitle={`Veja os palpites de todos nos jogos de ${dayLabel}`}
+      icon={<Swords className="h-6 w-6" />}
+    >
+      {games.length ? (
+        <div className="space-y-4">
+          {games.map((game) => {
+            const result = results.find((item) => item.gameId === game.id);
+            const availability = getPredictionAvailability(game, now);
+            const isRevealed = availability.status !== "open";
+            const isFinished =
+              Boolean(result?.finished) &&
+              result?.homeScore !== null &&
+              result?.awayScore !== null;
+            const filledCount = participants.filter((participant) => {
+              const prediction = getPrediction(predictions, participant.id, game.id);
+              return (
+                prediction &&
+                prediction.homeScore !== null &&
+                prediction.awayScore !== null
+              );
+            }).length;
+
+            return (
+              <div
+                key={game.id}
+                className="rounded-2xl border border-white/8 bg-black/20 p-4"
+              >
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
+                      {game.roundLabel} Â· Jogo {game.matchNumber}
+                    </p>
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-sm font-semibold text-white">
+                      <TeamLabel team={game.homeTeam} fallback="A definir" />
+                      <span className="text-slate-500">x</span>
+                      <TeamLabel team={game.awayTeam} fallback="A definir" />
+                    </div>
+                  </div>
+                  <div className="text-right text-xs text-slate-400">
+                    <p>{formatKickoff(game.kickoff)}</p>
+                    {isFinished ? (
+                      <p className="mt-1 text-sm font-semibold text-emerald-200">
+                        {result?.homeScore} x {result?.awayScore}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+
+                {isRevealed ? (
+                  <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                    {participants.map((participant) => {
+                      const prediction = getPrediction(
+                        predictions,
+                        participant.id,
+                        game.id,
+                      );
+                      const hasGuess =
+                        prediction &&
+                        prediction.homeScore !== null &&
+                        prediction.awayScore !== null;
+                      const tone = getGuessHitTone(prediction, result);
+
+                      return (
+                        <div
+                          key={participant.id}
+                          className="flex items-center justify-between gap-3 rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2"
+                        >
+                          <span className="flex items-center gap-2 truncate text-sm text-slate-200">
+                            <span
+                              className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+                              style={{ backgroundColor: participant.accentColor }}
+                            />
+                            <span className="truncate">{participant.name}</span>
+                          </span>
+                          <span className="flex items-center gap-2">
+                            {hasGuess ? (
+                              <span className="text-sm font-semibold text-white">
+                                {prediction?.homeScore} x {prediction?.awayScore}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-slate-500">Sem palpite</span>
+                            )}
+                            {tone ? (
+                              <span
+                                className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${tone.className}`}
+                              >
+                                {tone.label}
+                              </span>
+                            ) : null}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="mt-4 flex items-center gap-2 rounded-xl border border-white/8 bg-black/30 px-3 py-3 text-sm text-slate-300">
+                    <Lock className="h-4 w-4 text-amber-200" />
+                    <span>
+                      Palpites ocultos ate o jogo travar. {filledCount}/{participants.length}{" "}
+                      ja palpitaram.
+                    </span>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="rounded-2xl border border-white/8 bg-black/20 p-4 text-sm text-slate-300">
+          Nenhum jogo encontrado para hoje no calendario.
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
 function TeamLabel({
   team,
   fallback,
@@ -1352,6 +1528,33 @@ export function BolaoApp({
   const upcomingGames = chronologicalGames
     .filter((game) => new Date(game.kickoff).getTime() >= now.getTime())
     .slice(0, 6);
+  const dailyGuesses = (() => {
+    const todayKey = getCalendarDayKey(now.toISOString());
+    const todayGames = chronologicalGames.filter(
+      (game) => getCalendarDayKey(game.kickoff) === todayKey,
+    );
+
+    if (todayGames.length) {
+      return { dayLabel: formatCalendarDate(now.toISOString()), games: todayGames };
+    }
+
+    const nextGame = chronologicalGames.find(
+      (game) => new Date(game.kickoff).getTime() >= now.getTime(),
+    );
+
+    if (!nextGame) {
+      return { dayLabel: formatCalendarDate(now.toISOString()), games: [] as ResolvedGame[] };
+    }
+
+    const nextKey = getCalendarDayKey(nextGame.kickoff);
+
+    return {
+      dayLabel: formatCalendarDate(nextGame.kickoff),
+      games: chronologicalGames.filter(
+        (game) => getCalendarDayKey(game.kickoff) === nextKey,
+      ),
+    };
+  })();
   const predictionGamesByDate = useMemo(() => {
     const groups = chronologicalGames.reduce<
       Array<{ dayKey: string; label: string; games: ResolvedGame[] }>
@@ -2176,6 +2379,15 @@ export function BolaoApp({
                     />
                   </div>
                 </SectionCard>
+
+                <DailyGuessesCard
+                  dayLabel={dailyGuesses.dayLabel}
+                  games={dailyGuesses.games}
+                  participants={participantList}
+                  predictions={state.predictions}
+                  results={state.results}
+                  now={now}
+                />
 
                 <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
                   <SectionCard
