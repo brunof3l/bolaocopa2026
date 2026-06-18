@@ -65,17 +65,21 @@ input[type="number"] {
   color: #f8fafc;
 }
 
+/*
+ * Superficie "glass" sem backdrop-filter: o fundo ja e praticamente opaco,
+ * entao o blur quase nao aparecia e era o maior causador de travamento e dos
+ * "fantasmas" de tela ao rolar a pagina (principalmente no celular).
+ */
 .glass-surface {
   background: linear-gradient(
     180deg,
-    rgba(11, 18, 32, 0.9) 0%,
-    rgba(8, 15, 28, 0.86) 100%
+    rgba(13, 20, 34, 0.96) 0%,
+    rgba(9, 16, 29, 0.96) 100%
   );
   border: 1px solid rgba(255, 255, 255, 0.06);
   box-shadow:
-    0 24px 80px rgba(2, 6, 23, 0.42),
+    0 12px 36px rgba(2, 6, 23, 0.32),
     inset 0 1px 0 rgba(255, 255, 255, 0.04);
-  backdrop-filter: blur(16px);
 }
 
 .premium-scrollbar {

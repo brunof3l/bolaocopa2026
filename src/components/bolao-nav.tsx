@@ -64,7 +64,7 @@ export function BolaoNav({
 
   return (
     <nav className="glass-surface rounded-2xl p-2 md:rounded-3xl md:p-3">
-      <div className="premium-scrollbar flex snap-x gap-2 overflow-x-auto pb-1 md:grid md:grid-cols-2 md:overflow-visible md:pb-0 xl:grid-cols-5">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-2 xl:grid-cols-5">
         {visibleNavigationItems.map((item) => {
           const Icon = item.icon;
           const isActive = pathname === item.href;
@@ -73,17 +73,20 @@ export function BolaoNav({
             <Link
               key={item.href}
               href={item.href}
-              className={`min-w-[9.5rem] snap-start rounded-2xl border px-4 py-3 text-left transition active:scale-95 md:min-w-0 ${
+              aria-current={isActive ? "page" : undefined}
+              className={`rounded-2xl border px-3 py-2.5 text-left transition active:scale-95 md:px-4 md:py-3 ${
                 isActive
                   ? "border-emerald-300/40 bg-emerald-400/12 text-white shadow-[0_12px_30px_rgba(16,185,129,0.12)]"
-                  : "border-white/8 bg-white/[0.03] text-slate-300 hover:scale-[1.02] hover:border-white/20 hover:bg-white/[0.06]"
+                  : "border-white/8 bg-white/[0.03] text-slate-300 hover:border-white/20 hover:bg-white/[0.06]"
               }`}
             >
               <div className="flex items-center gap-2 text-sm font-semibold">
-                <Icon className="h-4 w-4" />
-                {item.label}
+                <Icon className="h-4 w-4 shrink-0" />
+                <span className="truncate">{item.label}</span>
               </div>
-              <p className="mt-1 text-xs text-slate-400">{item.description}</p>
+              <p className="mt-1 truncate text-xs text-slate-400">
+                {item.description}
+              </p>
             </Link>
           );
         })}

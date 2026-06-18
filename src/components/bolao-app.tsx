@@ -473,7 +473,7 @@ function SectionCard({
   children: React.ReactNode;
 }) {
   return (
-    <section className="glass-surface rounded-2xl p-4 transition-transform duration-300 hover:scale-[1.01] md:rounded-3xl md:p-6">
+    <section className="glass-surface rounded-2xl p-4 md:rounded-3xl md:p-6">
       <div className="mb-4 flex items-start justify-between gap-3 md:mb-5 md:gap-4">
         <div className="min-w-0">
           <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-bolao-accent/80 md:text-sm md:tracking-[0.24em]">
@@ -1074,7 +1074,7 @@ function BracketColumn({
         return (
           <div
             key={game.id}
-            className="glass-surface rounded-2xl p-4 transition-transform duration-300 hover:scale-[1.02]"
+            className="glass-surface rounded-2xl p-4 transition-colors duration-200 hover:border-white/15"
           >
             <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
               Jogo {game.matchNumber}
@@ -1156,7 +1156,7 @@ function PredictionGameCard({
     startedMs >= 0 && startedMs <= 150 * 60 * 1000 && !result?.finished;
 
   return (
-    <article className="glass-surface rounded-2xl p-3 transition-transform duration-300 hover:scale-[1.02] md:rounded-3xl md:p-4">
+    <article className="glass-surface rounded-2xl p-3 md:rounded-3xl md:p-4">
       <div className="flex flex-col gap-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
           <div className="min-w-0">
@@ -1368,7 +1368,7 @@ function AdminResultGameCard({
   isConfirming: boolean;
 }) {
   return (
-    <article className="glass-surface rounded-2xl p-3 transition-transform duration-300 hover:scale-[1.02] md:rounded-3xl md:p-4">
+    <article className="glass-surface rounded-2xl p-3 md:rounded-3xl md:p-4">
       <div className="flex flex-col gap-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
           <div className="min-w-0">
