@@ -58,6 +58,9 @@ export const initialState: AppState = {
     { userId: "gustavo", gameId: "match-019", homeScore: 2, awayScore: 1, updatedAt: now },
     { userId: "sidnei", gameId: "match-019", homeScore: 0, awayScore: 1, updatedAt: now },
     { userId: "sidnei-jr", gameId: "match-019", homeScore: 0, awayScore: 1, updatedAt: now },
+
+    // Suica x Bosnia (Grupo B, 18/06 15:00 MS) — match-009
+    { userId: "geovane", gameId: "match-009", homeScore: 2, awayScore: 1, updatedAt: now },
   ],
   specialPicks: [
     { userId: "bruno", champion: "Portugal", topScorer: "Cristiano Ronaldo" },
