@@ -397,6 +397,70 @@ function createInitialAppState(
   }
 }
 
+function LockCountdown({
+  kickoff,
+  className,
+}: {
+  kickoff: string;
+  className?: string;
+}) {
+  const [remainingMs, setRemainingMs] = useState<number | null>(null);
+
+  useEffect(() => {
+    const lockAt = new Date(kickoff).getTime() - 60 * 1000;
+    const update = () => setRemainingMs(lockAt - Date.now());
+    update();
+    const intervalId = setInterval(update, 1000);
+    return () => clearInterval(intervalId);
+  }, [kickoff]);
+
+  // So aparece na reta final: no maximo 24h antes de travar.
+  if (
+    remainingMs === null ||
+    remainingMs <= 0 ||
+    remainingMs > 24 * 60 * 60 * 1000
+  ) {
+    return null;
+  }
+
+  const totalSeconds = Math.floor(remainingMs / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const label =
+    hours > 0
+      ? `${hours}h ${String(minutes).padStart(2, "0")}min`
+      : minutes > 0
+        ? `${minutes}min ${String(seconds).padStart(2, "0")}s`
+        : `${seconds}s`;
+  const isUrgent = remainingMs <= 30 * 60 * 1000;
+
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold ${
+        isUrgent
+          ? "border-rose-300/30 bg-rose-400/10 text-rose-100"
+          : "border-amber-300/25 bg-amber-300/10 text-amber-100"
+      } ${className ?? ""}`}
+    >
+      <Clock3 className="h-3.5 w-3.5" />
+      Trava em {label}
+    </span>
+  );
+}
+
+function LiveBadge() {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-rose-400/30 bg-rose-500/15 px-2.5 py-1 text-xs font-semibold text-rose-100">
+      <span className="relative flex h-2 w-2">
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-400 opacity-75" />
+        <span className="relative inline-flex h-2 w-2 rounded-full bg-rose-400" />
+      </span>
+      AO VIVO
+    </span>
+  );
+}
+
 function SectionCard({
   title,
   subtitle,
@@ -438,7 +502,8 @@ function StatCard({
   helper: string;
 }) {
   return (
-    <div className="glass-surface rounded-2xl p-3 transition-transform duration-300 hover:scale-[1.02] md:p-4">
+    <div className="glass-surface relative overflow-hidden rounded-2xl p-3 transition-transform duration-300 hover:scale-[1.02] md:p-4">
+      <span className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-emerald-400/50 to-transparent" />
       <p className="text-xs text-bolao-muted md:text-sm">{label}</p>
       <p className="mt-2 text-xl font-semibold text-white md:text-2xl">{value}</p>
       <p className="mt-1 text-xs text-slate-500">{helper}</p>
@@ -505,7 +570,7 @@ function DashboardGameRow({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
-            {game.roundLabel} Â· Jogo {game.matchNumber}
+            {game.roundLabel} · Jogo {game.matchNumber}
           </p>
           <div className="mt-2 flex flex-col gap-2 text-sm font-semibold text-white sm:flex-row sm:items-center">
             <TeamLabel team={game.homeTeam} fallback="A definir" />
@@ -516,6 +581,9 @@ function DashboardGameRow({
         <div className="rounded-2xl border border-white/8 bg-white/5 px-4 py-3 text-sm text-slate-300">
           <p>{formatKickoff(game.kickoff)}</p>
           <p className="mt-1 text-xs text-slate-500">{game.stadium}</p>
+          <div className="mt-2 flex sm:justify-end">
+            <LockCountdown kickoff={game.kickoff} />
+          </div>
         </div>
       </div>
       {result?.finished && result.homeScore !== null && result.awayScore !== null && (
@@ -640,7 +708,7 @@ function DailyGuessesCard({
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0">
                     <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
-                      {game.roundLabel} Â· Jogo {game.matchNumber}
+                      {game.roundLabel} · Jogo {game.matchNumber}
                     </p>
                     <div className="mt-2 flex flex-wrap items-center gap-2 text-sm font-semibold text-white">
                       <TeamLabel team={game.homeTeam} fallback="A definir" />
@@ -788,6 +856,83 @@ function StandingsTable({
   );
 }
 
+const podiumStyles = [
+  {
+    ring: "border-amber-300/40 bg-gradient-to-b from-amber-300/15 to-transparent",
+    accent: "text-amber-200",
+    label: "Lider",
+  },
+  {
+    ring: "border-slate-300/30 bg-gradient-to-b from-slate-300/12 to-transparent",
+    accent: "text-slate-200",
+    label: "Vice-lider",
+  },
+  {
+    ring: "border-orange-400/30 bg-gradient-to-b from-orange-400/12 to-transparent",
+    accent: "text-orange-200",
+    label: "3o lugar",
+  },
+] as const;
+
+function RankingPodium({ ranking }: { ranking: RankingEntry[] }) {
+  const top = ranking.slice(0, 3);
+
+  if (top.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="grid gap-3 sm:grid-cols-3">
+      {top.map((entry, index) => {
+        const style = podiumStyles[index];
+        const settlementTone =
+          entry.netSettlement > 0
+            ? "text-emerald-300"
+            : entry.netSettlement < 0
+              ? "text-rose-300"
+              : "text-bolao-zero";
+
+        return (
+          <div
+            key={entry.userId}
+            className={`rounded-3xl border p-4 transition-transform duration-300 hover:scale-[1.02] ${style.ring} ${
+              index === 0 ? "sm:-translate-y-1" : ""
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <span
+                className={`inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-black/30 text-sm font-bold ${style.accent}`}
+              >
+                {index + 1}o
+              </span>
+              <Trophy className={`h-5 w-5 ${style.accent}`} />
+            </div>
+            <p className="mt-3 truncate text-lg font-semibold text-white">
+              {entry.name}
+            </p>
+            <p className="mt-1 text-xs uppercase tracking-[0.16em] text-slate-500">
+              {style.label}
+            </p>
+            <p className="mt-3 text-sm text-slate-300">
+              Ganhos:{" "}
+              <span className="font-semibold text-white">
+                {formatCurrency(entry.matchWinnings)}
+              </span>
+            </p>
+            <p className="mt-1 text-xs text-slate-400">
+              {entry.exactHits} cravos · {entry.resultHits} resultados certos
+            </p>
+            <p className={`mt-2 text-sm font-semibold ${settlementTone}`}>
+              {entry.netSettlement > 0 ? "+" : ""}
+              {formatCurrency(entry.netSettlement)} · {entry.settlementLabel}
+            </p>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function RankingTable({
   ranking,
 }: {
@@ -814,9 +959,39 @@ function RankingTable({
           </tr>
         </thead>
         <tbody>
-          {ranking.map((entry, index) => (
-            <tr key={entry.userId} className="border-t border-white/8 text-slate-200">
-              <td className="px-2 py-2.5 sm:px-3 md:px-4 md:py-3">{index + 1}</td>
+          {ranking.map((entry, index) => {
+            const highlight =
+              index === 0
+                ? "bg-amber-300/[0.07]"
+                : index === 1
+                  ? "bg-slate-300/[0.06]"
+                  : index === 2
+                    ? "bg-orange-400/[0.06]"
+                    : "";
+
+            return (
+            <tr
+              key={entry.userId}
+              className={`border-t border-white/8 text-slate-200 ${highlight}`}
+            >
+              <td className="px-2 py-2.5 sm:px-3 md:px-4 md:py-3">
+                {index < 3 ? (
+                  <span className="inline-flex items-center gap-1 font-semibold text-white">
+                    <Medal
+                      className={`h-4 w-4 ${
+                        index === 0
+                          ? "text-amber-300"
+                          : index === 1
+                            ? "text-slate-300"
+                            : "text-orange-300"
+                      }`}
+                    />
+                    {index + 1}
+                  </span>
+                ) : (
+                  index + 1
+                )}
+              </td>
               <td className="px-2 py-2.5 font-medium text-white sm:px-3 md:px-4 md:py-3">
                 {entry.name}
               </td>
@@ -834,7 +1009,7 @@ function RankingTable({
                   }`}
                 >
                   {entry.netSettlement > 0 ? "+" : ""}
-                  {formatCurrency(entry.netSettlement)} Â· {entry.settlementLabel}
+                  {formatCurrency(entry.netSettlement)} · {entry.settlementLabel}
                 </span>
               </td>
               <td className="px-2 py-2.5 sm:px-3 md:px-4 md:py-3">
@@ -849,7 +1024,8 @@ function RankingTable({
                 {entry.topScorerHit ? "Sim" : "Nao"}
               </td>
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -953,6 +1129,9 @@ function PredictionGameCard({
   const totalGamePot = breakdown
     ? breakdown.totalPot.result + breakdown.totalPot.goals + breakdown.totalPot.exact
     : 0;
+  const startedMs = now.getTime() - new Date(game.kickoff).getTime();
+  const isLive =
+    startedMs >= 0 && startedMs <= 150 * 60 * 1000 && !result?.finished;
 
   return (
     <article className="glass-surface rounded-2xl p-3 transition-transform duration-300 hover:scale-[1.02] md:rounded-3xl md:p-4">
@@ -961,7 +1140,7 @@ function PredictionGameCard({
           <div className="min-w-0">
             <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
               Jogo {game.matchNumber}
-              {game.matchdayLabel ? ` Â· ${game.matchdayLabel}` : ""}
+              {game.matchdayLabel ? ` · ${game.matchdayLabel}` : ""}
             </p>
             <div className="mt-2 flex flex-col items-center gap-2 text-center text-sm font-semibold text-white sm:flex-row sm:justify-start sm:text-base">
               <TeamLabel team={game.homeTeam} fallback="A definir" />
@@ -1037,7 +1216,10 @@ function PredictionGameCard({
           </div>
 
           <div className="rounded-2xl border border-white/8 bg-bolao-surfaceElevated/70 p-4 text-sm text-slate-300">
-            <p className="font-semibold text-white">Status do palpite</p>
+            <div className="flex items-center justify-between gap-2">
+              <p className="font-semibold text-white">Status do palpite</p>
+              {isLive ? <LiveBadge /> : null}
+            </div>
             <div className="mt-3 flex items-start gap-2">
               {availability.status === "open" ? (
                 <Unlock className="mt-0.5 h-4 w-4 text-emerald-300" />
@@ -1048,6 +1230,11 @@ function PredictionGameCard({
               )}
               <p>{availability.message}</p>
             </div>
+            {availability.status === "open" ? (
+              <div className="mt-3">
+                <LockCountdown kickoff={game.kickoff} />
+              </div>
+            ) : null}
             <p className="mt-2">
               Resultado oficial:{" "}
               <span className="font-semibold text-white">
@@ -1165,7 +1352,7 @@ function AdminResultGameCard({
           <div className="min-w-0">
             <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
               Jogo {game.matchNumber}
-              {game.matchdayLabel ? ` Â· ${game.matchdayLabel}` : ""}
+              {game.matchdayLabel ? ` · ${game.matchdayLabel}` : ""}
             </p>
             <div className="mt-2 flex flex-col items-center gap-2 text-center text-sm font-semibold text-white sm:flex-row sm:justify-start sm:text-base">
               <TeamLabel team={game.homeTeam} fallback="A definir" />
@@ -1277,7 +1464,7 @@ function AdminResultGameCard({
               <div className="mt-3 rounded-2xl border border-amber-400/20 bg-amber-400/10 p-4 text-sm text-amber-50">
                 <p className="font-medium text-white">Confirmar salvamento deste resultado?</p>
                 <p className="mt-1 text-amber-100/90">
-                  Placar: {result?.homeScore ?? "-"} x {result?.awayScore ?? "-"} Â·{" "}
+                  Placar: {result?.homeScore ?? "-"} x {result?.awayScore ?? "-"} ·{" "}
                   {result?.finished ? "Encerrado" : "Agendado"}
                 </p>
                 <div className="mt-3 flex flex-col gap-2 sm:flex-row">
@@ -1427,6 +1614,12 @@ export function BolaoApp({
   const [predictionFeedback, setPredictionFeedback] = useState("");
   const [predictionErrorGameId, setPredictionErrorGameId] = useState<string | null>(null);
   const [predictionError, setPredictionError] = useState("");
+  const [predictionFilter, setPredictionFilter] = useState<
+    "all" | "open" | "pending"
+  >("all");
+  const [predictionStageFilter, setPredictionStageFilter] = useState<
+    "all" | "group" | "knockout"
+  >("all");
   const [isSavingSpecialPick, startSavingSpecialPick] = useTransition();
   const [specialPickFeedback, setSpecialPickFeedback] = useState("");
   const [specialPickError, setSpecialPickError] = useState("");
@@ -1611,6 +1804,54 @@ export function BolaoApp({
         );
       }).length
     : 0;
+  const visiblePredictionGamesByDate =
+    predictionFilter === "all" && predictionStageFilter === "all"
+      ? predictionGamesByDate
+      : predictionGamesByDate
+          .map((group) => ({
+            ...group,
+            games: group.games.filter((game) => {
+              if (predictionStageFilter === "group" && game.stage !== "group") {
+                return false;
+              }
+
+              if (
+                predictionStageFilter === "knockout" &&
+                game.stage === "group"
+              ) {
+                return false;
+              }
+
+              if (predictionFilter === "all") {
+                return true;
+              }
+
+              const availability = getPredictionAvailability(game, now);
+
+              if (availability.status !== "open") {
+                return false;
+              }
+
+              if (predictionFilter === "open") {
+                return true;
+              }
+
+              const prediction = effectiveSelectedUserId
+                ? getPrediction(
+                    state.predictions,
+                    effectiveSelectedUserId,
+                    game.id,
+                  )
+                : null;
+
+              return (
+                !prediction ||
+                prediction.homeScore === null ||
+                prediction.awayScore === null
+              );
+            }),
+          }))
+          .filter((group) => group.games.length > 0);
   const officialGamesByDate = useMemo(() => {
     const groups = chronologicalGames.reduce<
       Array<{ dayKey: string; label: string; games: ResolvedGame[] }>
@@ -2284,6 +2525,20 @@ export function BolaoApp({
   return (
     <main className="min-h-screen bg-bolao-bg text-slate-100">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-3 py-4 sm:px-4 sm:py-5 md:gap-6 md:px-6 md:py-8">
+        <div className="flex items-center gap-3 px-1">
+          <div className="rounded-2xl border border-amber-300/25 bg-gradient-to-br from-amber-300/25 via-emerald-400/15 to-transparent p-2.5 text-amber-200 shadow-[0_8px_30px_rgba(251,191,36,0.12)]">
+            <Trophy className="h-6 w-6" />
+          </div>
+          <div className="min-w-0">
+            <h1 className="bg-gradient-to-r from-white via-emerald-100 to-amber-100 bg-clip-text text-xl font-bold tracking-tight text-transparent sm:text-2xl">
+              Bolao Copa 2026
+            </h1>
+            <p className="truncate text-xs text-slate-400 sm:text-sm">
+              Palpites, ranking e premios entre amigos
+            </p>
+          </div>
+        </div>
+
         <BolaoNav
           isLoggedIn={isLoggedIn}
           currentUserRole={currentUserRole}
@@ -2744,8 +2999,74 @@ export function BolaoApp({
                   </div>
                 </div>
 
+                <div className="mb-3 flex flex-wrap gap-2">
+                  {(
+                    [
+                      { id: "all", label: "Todas as fases" },
+                      { id: "group", label: "Fase de grupos" },
+                      { id: "knockout", label: "Mata-mata" },
+                    ] as const
+                  ).map((option) => {
+                    const isActive = predictionStageFilter === option.id;
+
+                    return (
+                      <button
+                        key={option.id}
+                        type="button"
+                        onClick={() => setPredictionStageFilter(option.id)}
+                        aria-pressed={isActive}
+                        className={`rounded-full border px-4 py-2 text-xs font-semibold transition active:scale-95 ${
+                          isActive
+                            ? "border-sky-300/40 bg-sky-400/15 text-white"
+                            : "border-white/10 bg-white/[0.03] text-slate-300 hover:border-white/20 hover:bg-white/[0.06]"
+                        }`}
+                      >
+                        {option.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="mb-6 flex flex-wrap gap-2">
+                  {(
+                    [
+                      { id: "all", label: "Todos os jogos" },
+                      { id: "open", label: `Abertos (${openPredictionsCount})` },
+                      {
+                        id: "pending",
+                        label: `Pendentes (${pendingPredictionsCount})`,
+                      },
+                    ] as const
+                  ).map((option) => {
+                    const isActive = predictionFilter === option.id;
+
+                    return (
+                      <button
+                        key={option.id}
+                        type="button"
+                        onClick={() => setPredictionFilter(option.id)}
+                        aria-pressed={isActive}
+                        className={`rounded-full border px-4 py-2 text-xs font-semibold transition active:scale-95 ${
+                          isActive
+                            ? "border-emerald-300/40 bg-emerald-400/15 text-white"
+                            : "border-white/10 bg-white/[0.03] text-slate-300 hover:border-white/20 hover:bg-white/[0.06]"
+                        }`}
+                      >
+                        {option.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
                 <div className="space-y-6">
-                  {predictionGamesByDate.map((group) => (
+                  {visiblePredictionGamesByDate.length === 0 ? (
+                    <div className="rounded-2xl border border-white/8 bg-black/20 px-4 py-8 text-center text-sm text-slate-400">
+                      {predictionFilter === "pending"
+                        ? "Nenhum palpite pendente. Voce esta em dia!"
+                        : "Nenhum jogo para este filtro no momento."}
+                    </div>
+                  ) : null}
+                  {visiblePredictionGamesByDate.map((group) => (
                     <div key={group.dayKey} className="space-y-4">
                       <div className="rounded-2xl border border-white/8 bg-white/5 px-4 py-3">
                         <p className="text-sm font-semibold text-white">{group.label}</p>
@@ -2860,6 +3181,12 @@ export function BolaoApp({
                   subtitle="Ganhos acumulados, premios finais e acerto de contas"
                   icon={<Medal className="h-6 w-6" />}
                 >
+                  <div className="mb-5">
+                    <p className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      Podio geral
+                    </p>
+                    <RankingPodium ranking={ranking} />
+                  </div>
                   <div className="grid gap-4 lg:grid-cols-4">
                     <div className="rounded-3xl border border-amber-300/15 bg-amber-300/5 p-4">
                       <p className="text-sm text-amber-100/80">Lider em cravos</p>
@@ -2963,10 +3290,10 @@ export function BolaoApp({
                             #{entry.thirdPlaceRank} terceiro
                           </p>
                           <p className="mt-2 font-semibold text-white">
-                            {entry.groupId} Â· {entry.team.shortName}
+                            {entry.groupId} · {entry.team.shortName}
                           </p>
                           <p className="mt-1 text-sm text-slate-400">
-                            {entry.points} pts Â· SG {entry.goalDifference} Â· GP {entry.goalsFor}
+                            {entry.points} pts · SG {entry.goalDifference} · GP {entry.goalsFor}
                           </p>
                         </div>
                       ))}

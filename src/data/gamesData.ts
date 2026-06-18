@@ -159,147 +159,149 @@ export const teamsById = Object.fromEntries(
   teams.map((currentTeam) => [currentTeam.id, currentTeam] as const),
 );
 
-// Todos os horários em fuso de MS (UTC-4 / America/Campo_Grande).
-// Formato: YYYY-MM-DDTHH:MM:00-04:00
-// kickoffs[rodada][jogo] — rodada 0..2, jogo 0..1
-const groupCalendar: Record<
-  GroupId,
-  {
-    kickoffs: [[string, string], [string, string], [string, string]];
-    stadiums: [string, string];
-  }
-> = {
-  A: {
-    kickoffs: [
-      ["2026-06-11T15:00:00-04:00", "2026-06-11T22:00:00-04:00"],
-      ["2026-06-18T12:00:00-04:00", "2026-06-18T21:00:00-04:00"],
-      ["2026-06-24T21:00:00-04:00", "2026-06-24T21:00:00-04:00"],
-    ],
-    stadiums: ["Estadio Azteca", "Estadio Guadalajara"],
-  },
-  B: {
-    kickoffs: [
-      ["2026-06-12T15:00:00-04:00", "2026-06-13T15:00:00-04:00"],
-      ["2026-06-18T15:00:00-04:00", "2026-06-18T18:00:00-04:00"],
-      ["2026-06-24T15:00:00-04:00", "2026-06-24T15:00:00-04:00"],
-    ],
-    stadiums: ["BMO Field (Toronto)", "BC Place (Vancouver)"],
-  },
-  C: {
-    kickoffs: [
-      ["2026-06-13T18:00:00-04:00", "2026-06-13T21:00:00-04:00"],
-      ["2026-06-19T18:00:00-04:00", "2026-06-19T20:30:00-04:00"],
-      ["2026-06-24T18:00:00-04:00", "2026-06-24T18:00:00-04:00"],
-    ],
-    stadiums: ["MetLife Stadium (NY/NJ)", "Gillette Stadium (Boston)"],
-  },
-  D: {
-    kickoffs: [
-      ["2026-06-12T21:00:00-04:00", "2026-06-14T00:00:00-04:00"],
-      ["2026-06-19T15:00:00-04:00", "2026-06-19T23:00:00-04:00"],
-      ["2026-06-25T22:00:00-04:00", "2026-06-25T22:00:00-04:00"],
-    ],
-    stadiums: ["SoFi Stadium (Los Angeles)", "Lumen Field (Seattle)"],
-  },
-  E: {
-    kickoffs: [
-      ["2026-06-14T13:00:00-04:00", "2026-06-14T19:00:00-04:00"],
-      ["2026-06-20T16:00:00-04:00", "2026-06-20T20:00:00-04:00"],
-      ["2026-06-25T16:00:00-04:00", "2026-06-25T16:00:00-04:00"],
-    ],
-    stadiums: ["NRG Stadium (Houston)", "Lincoln Financial Field (Philadelphia)"],
-  },
-  F: {
-    kickoffs: [
-      ["2026-06-14T16:00:00-04:00", "2026-06-14T22:00:00-04:00"],
-      ["2026-06-20T13:00:00-04:00", "2026-06-21T00:00:00-04:00"],
-      ["2026-06-25T19:00:00-04:00", "2026-06-25T19:00:00-04:00"],
-    ],
-    stadiums: ["AT&T Stadium (Dallas)", "Estadio BBVA (Monterrey)"],
-  },
-  G: {
-    kickoffs: [
-      ["2026-06-15T15:00:00-04:00", "2026-06-15T21:00:00-04:00"],
-      ["2026-06-21T15:00:00-04:00", "2026-06-21T21:00:00-04:00"],
-      ["2026-06-26T23:00:00-04:00", "2026-06-26T23:00:00-04:00"],
-    ],
-    stadiums: ["Lumen Field (Seattle)", "SoFi Stadium (Los Angeles)"],
-  },
-  H: {
-    kickoffs: [
-      ["2026-06-15T12:00:00-04:00", "2026-06-15T18:00:00-04:00"],
-      ["2026-06-21T12:00:00-04:00", "2026-06-21T18:00:00-04:00"],
-      ["2026-06-26T20:00:00-04:00", "2026-06-26T20:00:00-04:00"],
-    ],
-    stadiums: ["Mercedes-Benz Stadium (Atlanta)", "Hard Rock Stadium (Miami)"],
-  },
-  I: {
-    kickoffs: [
-      ["2026-06-16T15:00:00-04:00", "2026-06-16T18:00:00-04:00"],
-      ["2026-06-22T17:00:00-04:00", "2026-06-22T20:00:00-04:00"],
-      ["2026-06-26T15:00:00-04:00", "2026-06-26T15:00:00-04:00"],
-    ],
-    stadiums: ["MetLife Stadium (NY/NJ)", "Gillette Stadium (Boston)"],
-  },
-  J: {
-    kickoffs: [
-      ["2026-06-16T21:00:00-04:00", "2026-06-17T00:00:00-04:00"],
-      ["2026-06-22T13:00:00-04:00", "2026-06-22T23:00:00-04:00"],
-      ["2026-06-27T22:00:00-04:00", "2026-06-27T22:00:00-04:00"],
-    ],
-    stadiums: ["Arrowhead Stadium (Kansas City)", "Levi's Stadium (San Francisco)"],
-  },
-  K: {
-    kickoffs: [
-      ["2026-06-17T13:00:00-04:00", "2026-06-17T22:00:00-04:00"],
-      ["2026-06-23T13:00:00-04:00", "2026-06-23T22:00:00-04:00"],
-      ["2026-06-27T19:30:00-04:00", "2026-06-27T19:30:00-04:00"],
-    ],
-    stadiums: ["NRG Stadium (Houston)", "Estadio Azteca (Mexico City)"],
-  },
-  L: {
-    kickoffs: [
-      ["2026-06-17T16:00:00-04:00", "2026-06-17T19:00:00-04:00"],
-      ["2026-06-23T16:00:00-04:00", "2026-06-23T19:00:00-04:00"],
-      ["2026-06-27T17:00:00-04:00", "2026-06-27T17:00:00-04:00"],
-    ],
-    stadiums: ["AT&T Stadium (Dallas)", "BMO Field (Toronto)"],
-  },
+// Nomes oficiais dos estadios (com a cidade-sede entre parenteses).
+const venues = {
+  azteca: "Estadio Azteca (Mexico City)",
+  guadalajara: "Estadio Guadalajara",
+  monterrey: "Estadio BBVA (Monterrey)",
+  atlanta: "Mercedes-Benz Stadium (Atlanta)",
+  miami: "Hard Rock Stadium (Miami)",
+  toronto: "BMO Field (Toronto)",
+  vancouver: "BC Place (Vancouver)",
+  seattle: "Lumen Field (Seattle)",
+  losAngeles: "SoFi Stadium (Los Angeles)",
+  sanFrancisco: "Levi's Stadium (San Francisco)",
+  nyNj: "MetLife Stadium (NY/NJ)",
+  boston: "Gillette Stadium (Boston)",
+  philadelphia: "Lincoln Financial Field (Philadelphia)",
+  houston: "NRG Stadium (Houston)",
+  dallas: "AT&T Stadium (Dallas)",
+  kansasCity: "Arrowhead Stadium (Kansas City)",
+} as const;
+
+type GroupFixture = {
+  homeTeamId: string;
+  awayTeamId: string;
+  // Horario em fuso de MS (UTC-4 / America/Campo_Grande). Calendario oficial
+  // da Copa do Mundo 2026, com confrontos, datas e sedes reais de cada jogo.
+  kickoff: string;
+  stadium: string;
+};
+
+// Os 6 jogos de cada grupo na ordem cronologica oficial. As rodadas sao
+// formadas a cada par de jogos (1-2 = Rodada 1, 3-4 = Rodada 2, 5-6 = Rodada 3).
+const groupFixtures: Record<GroupId, GroupFixture[]> = {
+  A: [
+    { homeTeamId: "mexico", awayTeamId: "south-africa", kickoff: "2026-06-11T15:00:00-04:00", stadium: venues.azteca },
+    { homeTeamId: "korea-republic", awayTeamId: "czechia", kickoff: "2026-06-11T22:00:00-04:00", stadium: venues.guadalajara },
+    { homeTeamId: "czechia", awayTeamId: "south-africa", kickoff: "2026-06-18T12:00:00-04:00", stadium: venues.atlanta },
+    { homeTeamId: "mexico", awayTeamId: "korea-republic", kickoff: "2026-06-18T21:00:00-04:00", stadium: venues.guadalajara },
+    { homeTeamId: "czechia", awayTeamId: "mexico", kickoff: "2026-06-24T21:00:00-04:00", stadium: venues.azteca },
+    { homeTeamId: "south-africa", awayTeamId: "korea-republic", kickoff: "2026-06-24T21:00:00-04:00", stadium: venues.monterrey },
+  ],
+  B: [
+    { homeTeamId: "canada", awayTeamId: "bosnia", kickoff: "2026-06-12T15:00:00-04:00", stadium: venues.toronto },
+    { homeTeamId: "qatar", awayTeamId: "switzerland", kickoff: "2026-06-13T15:00:00-04:00", stadium: venues.sanFrancisco },
+    { homeTeamId: "switzerland", awayTeamId: "bosnia", kickoff: "2026-06-18T15:00:00-04:00", stadium: venues.losAngeles },
+    { homeTeamId: "canada", awayTeamId: "qatar", kickoff: "2026-06-18T18:00:00-04:00", stadium: venues.vancouver },
+    { homeTeamId: "switzerland", awayTeamId: "canada", kickoff: "2026-06-24T15:00:00-04:00", stadium: venues.vancouver },
+    { homeTeamId: "bosnia", awayTeamId: "qatar", kickoff: "2026-06-24T15:00:00-04:00", stadium: venues.seattle },
+  ],
+  C: [
+    { homeTeamId: "brazil", awayTeamId: "morocco", kickoff: "2026-06-13T18:00:00-04:00", stadium: venues.nyNj },
+    { homeTeamId: "haiti", awayTeamId: "scotland", kickoff: "2026-06-13T21:00:00-04:00", stadium: venues.boston },
+    { homeTeamId: "scotland", awayTeamId: "morocco", kickoff: "2026-06-19T18:00:00-04:00", stadium: venues.boston },
+    { homeTeamId: "brazil", awayTeamId: "haiti", kickoff: "2026-06-19T20:30:00-04:00", stadium: venues.philadelphia },
+    { homeTeamId: "scotland", awayTeamId: "brazil", kickoff: "2026-06-24T18:00:00-04:00", stadium: venues.miami },
+    { homeTeamId: "morocco", awayTeamId: "haiti", kickoff: "2026-06-24T18:00:00-04:00", stadium: venues.atlanta },
+  ],
+  D: [
+    { homeTeamId: "usa", awayTeamId: "paraguay", kickoff: "2026-06-12T21:00:00-04:00", stadium: venues.losAngeles },
+    { homeTeamId: "australia", awayTeamId: "turkiye", kickoff: "2026-06-14T00:00:00-04:00", stadium: venues.vancouver },
+    { homeTeamId: "usa", awayTeamId: "australia", kickoff: "2026-06-19T15:00:00-04:00", stadium: venues.seattle },
+    { homeTeamId: "turkiye", awayTeamId: "paraguay", kickoff: "2026-06-19T23:00:00-04:00", stadium: venues.sanFrancisco },
+    { homeTeamId: "turkiye", awayTeamId: "usa", kickoff: "2026-06-25T22:00:00-04:00", stadium: venues.losAngeles },
+    { homeTeamId: "paraguay", awayTeamId: "australia", kickoff: "2026-06-25T22:00:00-04:00", stadium: venues.sanFrancisco },
+  ],
+  E: [
+    { homeTeamId: "germany", awayTeamId: "curacao", kickoff: "2026-06-14T13:00:00-04:00", stadium: venues.houston },
+    { homeTeamId: "ivory-coast", awayTeamId: "ecuador", kickoff: "2026-06-14T19:00:00-04:00", stadium: venues.philadelphia },
+    { homeTeamId: "germany", awayTeamId: "ivory-coast", kickoff: "2026-06-20T16:00:00-04:00", stadium: venues.toronto },
+    { homeTeamId: "ecuador", awayTeamId: "curacao", kickoff: "2026-06-20T20:00:00-04:00", stadium: venues.kansasCity },
+    { homeTeamId: "curacao", awayTeamId: "ivory-coast", kickoff: "2026-06-25T16:00:00-04:00", stadium: venues.philadelphia },
+    { homeTeamId: "ecuador", awayTeamId: "germany", kickoff: "2026-06-25T16:00:00-04:00", stadium: venues.nyNj },
+  ],
+  F: [
+    { homeTeamId: "netherlands", awayTeamId: "japan", kickoff: "2026-06-14T16:00:00-04:00", stadium: venues.dallas },
+    { homeTeamId: "sweden", awayTeamId: "tunisia", kickoff: "2026-06-14T22:00:00-04:00", stadium: venues.monterrey },
+    { homeTeamId: "netherlands", awayTeamId: "sweden", kickoff: "2026-06-20T13:00:00-04:00", stadium: venues.houston },
+    { homeTeamId: "tunisia", awayTeamId: "japan", kickoff: "2026-06-21T00:00:00-04:00", stadium: venues.monterrey },
+    { homeTeamId: "japan", awayTeamId: "sweden", kickoff: "2026-06-25T19:00:00-04:00", stadium: venues.dallas },
+    { homeTeamId: "tunisia", awayTeamId: "netherlands", kickoff: "2026-06-25T19:00:00-04:00", stadium: venues.kansasCity },
+  ],
+  G: [
+    { homeTeamId: "belgium", awayTeamId: "egypt", kickoff: "2026-06-15T15:00:00-04:00", stadium: venues.seattle },
+    { homeTeamId: "iran", awayTeamId: "new-zealand", kickoff: "2026-06-15T21:00:00-04:00", stadium: venues.losAngeles },
+    { homeTeamId: "belgium", awayTeamId: "iran", kickoff: "2026-06-21T15:00:00-04:00", stadium: venues.losAngeles },
+    { homeTeamId: "new-zealand", awayTeamId: "egypt", kickoff: "2026-06-21T21:00:00-04:00", stadium: venues.vancouver },
+    { homeTeamId: "egypt", awayTeamId: "iran", kickoff: "2026-06-26T23:00:00-04:00", stadium: venues.seattle },
+    { homeTeamId: "new-zealand", awayTeamId: "belgium", kickoff: "2026-06-26T23:00:00-04:00", stadium: venues.vancouver },
+  ],
+  H: [
+    { homeTeamId: "spain", awayTeamId: "cape-verde", kickoff: "2026-06-15T12:00:00-04:00", stadium: venues.atlanta },
+    { homeTeamId: "saudi-arabia", awayTeamId: "uruguay", kickoff: "2026-06-15T18:00:00-04:00", stadium: venues.miami },
+    { homeTeamId: "spain", awayTeamId: "saudi-arabia", kickoff: "2026-06-21T12:00:00-04:00", stadium: venues.atlanta },
+    { homeTeamId: "uruguay", awayTeamId: "cape-verde", kickoff: "2026-06-21T18:00:00-04:00", stadium: venues.miami },
+    { homeTeamId: "cape-verde", awayTeamId: "saudi-arabia", kickoff: "2026-06-26T20:00:00-04:00", stadium: venues.houston },
+    { homeTeamId: "uruguay", awayTeamId: "spain", kickoff: "2026-06-26T20:00:00-04:00", stadium: venues.guadalajara },
+  ],
+  I: [
+    { homeTeamId: "france", awayTeamId: "senegal", kickoff: "2026-06-16T15:00:00-04:00", stadium: venues.nyNj },
+    { homeTeamId: "iraq", awayTeamId: "norway", kickoff: "2026-06-16T18:00:00-04:00", stadium: venues.boston },
+    { homeTeamId: "france", awayTeamId: "iraq", kickoff: "2026-06-22T17:00:00-04:00", stadium: venues.philadelphia },
+    { homeTeamId: "norway", awayTeamId: "senegal", kickoff: "2026-06-22T20:00:00-04:00", stadium: venues.nyNj },
+    { homeTeamId: "norway", awayTeamId: "france", kickoff: "2026-06-26T15:00:00-04:00", stadium: venues.boston },
+    { homeTeamId: "senegal", awayTeamId: "iraq", kickoff: "2026-06-26T15:00:00-04:00", stadium: venues.toronto },
+  ],
+  J: [
+    { homeTeamId: "argentina", awayTeamId: "algeria", kickoff: "2026-06-16T21:00:00-04:00", stadium: venues.kansasCity },
+    { homeTeamId: "austria", awayTeamId: "jordan", kickoff: "2026-06-17T00:00:00-04:00", stadium: venues.sanFrancisco },
+    { homeTeamId: "argentina", awayTeamId: "austria", kickoff: "2026-06-22T13:00:00-04:00", stadium: venues.dallas },
+    { homeTeamId: "jordan", awayTeamId: "algeria", kickoff: "2026-06-22T23:00:00-04:00", stadium: venues.sanFrancisco },
+    { homeTeamId: "algeria", awayTeamId: "austria", kickoff: "2026-06-27T22:00:00-04:00", stadium: venues.kansasCity },
+    { homeTeamId: "jordan", awayTeamId: "argentina", kickoff: "2026-06-27T22:00:00-04:00", stadium: venues.dallas },
+  ],
+  K: [
+    { homeTeamId: "portugal", awayTeamId: "dr-congo", kickoff: "2026-06-17T13:00:00-04:00", stadium: venues.houston },
+    { homeTeamId: "uzbekistan", awayTeamId: "colombia", kickoff: "2026-06-17T22:00:00-04:00", stadium: venues.azteca },
+    { homeTeamId: "portugal", awayTeamId: "uzbekistan", kickoff: "2026-06-23T13:00:00-04:00", stadium: venues.houston },
+    { homeTeamId: "colombia", awayTeamId: "dr-congo", kickoff: "2026-06-23T22:00:00-04:00", stadium: venues.guadalajara },
+    { homeTeamId: "colombia", awayTeamId: "portugal", kickoff: "2026-06-27T19:30:00-04:00", stadium: venues.miami },
+    { homeTeamId: "dr-congo", awayTeamId: "uzbekistan", kickoff: "2026-06-27T19:30:00-04:00", stadium: venues.atlanta },
+  ],
+  L: [
+    { homeTeamId: "england", awayTeamId: "croatia", kickoff: "2026-06-17T16:00:00-04:00", stadium: venues.dallas },
+    { homeTeamId: "ghana", awayTeamId: "panama", kickoff: "2026-06-17T19:00:00-04:00", stadium: venues.toronto },
+    { homeTeamId: "england", awayTeamId: "ghana", kickoff: "2026-06-23T16:00:00-04:00", stadium: venues.boston },
+    { homeTeamId: "panama", awayTeamId: "croatia", kickoff: "2026-06-23T19:00:00-04:00", stadium: venues.toronto },
+    { homeTeamId: "panama", awayTeamId: "england", kickoff: "2026-06-27T17:00:00-04:00", stadium: venues.nyNj },
+    { homeTeamId: "croatia", awayTeamId: "ghana", kickoff: "2026-06-27T17:00:00-04:00", stadium: venues.philadelphia },
+  ],
 };
 
 function createGroupGames(group: GroupDefinition, startMatchNumber: number) {
-  const [team1, team2, team3, team4] = group.teams;
-  const calendar = groupCalendar[group.id];
-
-  const pairings = [
-    [
-      { homeTeamId: team1.id, awayTeamId: team4.id },
-      { homeTeamId: team2.id, awayTeamId: team3.id },
-    ],
-    [
-      { homeTeamId: team1.id, awayTeamId: team3.id },
-      { homeTeamId: team4.id, awayTeamId: team2.id },
-    ],
-    [
-      { homeTeamId: team1.id, awayTeamId: team2.id },
-      { homeTeamId: team3.id, awayTeamId: team4.id },
-    ],
-  ] as const;
-
-  return pairings.flatMap((matchdayGames, matchdayIndex) => {
-    return matchdayGames.map((pairing, gameIndex) => ({
-      id: `match-${String(startMatchNumber + matchdayIndex * 2 + gameIndex).padStart(3, "0")}`,
-      matchNumber: startMatchNumber + matchdayIndex * 2 + gameIndex,
-      stage: "group" as const,
-      roundLabel: "Fase de grupos",
-      matchdayLabel: `Grupo ${group.id} - Rodada ${matchdayIndex + 1}`,
-      kickoff: calendar.kickoffs[matchdayIndex][gameIndex],
-      stadium: calendar.stadiums[gameIndex],
-      groupId: group.id,
-      homeTeamId: pairing.homeTeamId,
-      awayTeamId: pairing.awayTeamId,
-    }));
-  });
+  return groupFixtures[group.id].map((fixture, index) => ({
+    id: `match-${String(startMatchNumber + index).padStart(3, "0")}`,
+    matchNumber: startMatchNumber + index,
+    stage: "group" as const,
+    roundLabel: "Fase de grupos",
+    matchdayLabel: `Grupo ${group.id} - Rodada ${Math.floor(index / 2) + 1}`,
+    kickoff: fixture.kickoff,
+    stadium: fixture.stadium,
+    groupId: group.id,
+    homeTeamId: fixture.homeTeamId,
+    awayTeamId: fixture.awayTeamId,
+  }));
 }
 
 function createKnockoutGame(
