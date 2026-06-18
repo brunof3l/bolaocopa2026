@@ -678,17 +678,21 @@ function DailyGuessesCard({
   participants,
   predictions,
   results,
+  now,
+  currentUserId,
 }: {
   dayLabel: string;
   games: ResolvedGame[];
   participants: Participant[];
   predictions: Prediction[];
   results: MatchResult[];
+  now: Date;
+  currentUserId: string | null;
 }) {
   return (
     <SectionCard
       title="Palpites do Dia"
-      subtitle={`Veja os palpites de todos nos jogos de ${dayLabel}`}
+      subtitle={`Palpites de ${dayLabel} ficam ocultos ate cada jogo comecar`}
       icon={<Swords className="h-6 w-6" />}
     >
       {games.length ? (
@@ -699,6 +703,8 @@ function DailyGuessesCard({
               Boolean(result?.finished) &&
               result?.homeScore !== null &&
               result?.awayScore !== null;
+            const hasStarted =
+              new Date(game.kickoff).getTime() <= now.getTime();
 
             return (
               <div
@@ -743,6 +749,12 @@ function DailyGuessesCard({
                           game.id,
                         );
                         const status = getGuessStatus(prediction, result);
+                        // So revela o placar depois do jogo comecar (ou se for
+                        // o palpite do proprio usuario logado), evitando copia.
+                        const revealGuess =
+                          hasStarted ||
+                          isFinished ||
+                          participant.id === currentUserId;
 
                         return (
                           <tr
@@ -760,9 +772,19 @@ function DailyGuessesCard({
                             </td>
                             <td className="px-3 py-2.5">
                               {status.hasGuess ? (
-                                <span className="font-semibold text-white">
-                                  {prediction?.homeScore} x {prediction?.awayScore}
-                                </span>
+                                revealGuess ? (
+                                  <span className="font-semibold text-white">
+                                    {prediction?.homeScore} x {prediction?.awayScore}
+                                    {participant.id === currentUserId && !hasStarted
+                                      ? " (voce)"
+                                      : ""}
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1.5 text-slate-400">
+                                    <Lock className="h-3.5 w-3.5" />
+                                    Oculto ate o jogo
+                                  </span>
+                                )
                               ) : (
                                 <span className="text-slate-500">Aguardando palpite</span>
                               )}
@@ -2656,6 +2678,8 @@ export function BolaoApp({
                   participants={participantList}
                   predictions={state.predictions}
                   results={state.results}
+                  now={now}
+                  currentUserId={effectiveSelectedUserId}
                 />
 
                 <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
