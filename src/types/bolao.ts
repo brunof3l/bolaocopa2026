@@ -107,6 +107,9 @@ export type MatchResult = {
   homeScore: number | null;
   awayScore: number | null;
   finished: boolean;
+  // Momento em que o jogo foi encerrado (ISO). Usado para ordenar o acumulado
+  // entre jogos do mesmo horario pela ordem real de encerramento.
+  finishedAt?: string | null;
 };
 
 export type OfficialAwards = {

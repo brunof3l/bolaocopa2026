@@ -368,6 +368,19 @@ export async function saveOfficialAppResultAction(input: SaveOfficialAppResultIn
     throw new Error("Informe os dois placares para marcar o jogo como encerrado.");
   }
 
+  const [existing] = await db
+    .select({ finishedAt: officialResults.finishedAt })
+    .from(officialResults)
+    .where(eq(officialResults.gameId, input.gameId))
+    .limit(1);
+
+  // Carimba o momento do encerramento apenas na primeira vez que o jogo e
+  // encerrado (preserva a ordem mesmo se o placar for editado depois). Ao
+  // reabrir o jogo, o carimbo e removido.
+  const finishedAt = input.finished
+    ? existing?.finishedAt ?? new Date()
+    : null;
+
   await db
     .insert(officialResults)
     .values({
@@ -375,6 +388,7 @@ export async function saveOfficialAppResultAction(input: SaveOfficialAppResultIn
       homeScore,
       awayScore,
       finished: input.finished,
+      finishedAt,
     })
     .onConflictDoUpdate({
       target: officialResults.gameId,
@@ -382,6 +396,7 @@ export async function saveOfficialAppResultAction(input: SaveOfficialAppResultIn
         homeScore,
         awayScore,
         finished: input.finished,
+        finishedAt,
         updatedAt: new Date(),
       },
     });
@@ -395,6 +410,7 @@ export async function saveOfficialAppResultAction(input: SaveOfficialAppResultIn
       homeScore,
       awayScore,
       finished: input.finished,
+      finishedAt: finishedAt ? finishedAt.toISOString() : null,
     },
   };
 }

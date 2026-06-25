@@ -73,11 +73,18 @@ export async function getOfficialResultsForApp() {
         homeScore: officialResults.homeScore,
         awayScore: officialResults.awayScore,
         finished: officialResults.finished,
+        finishedAt: officialResults.finishedAt,
       })
       .from(officialResults)
       .orderBy(asc(officialResults.gameId));
 
-    return rows;
+    return rows.map((row) => ({
+      gameId: row.gameId,
+      homeScore: row.homeScore,
+      awayScore: row.awayScore,
+      finished: row.finished,
+      finishedAt: row.finishedAt ? row.finishedAt.toISOString() : null,
+    }));
   } catch {
     return [];
   }

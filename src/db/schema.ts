@@ -64,6 +64,10 @@ export const officialResults = pgTable("official_results", {
   homeScore: integer("home_score"),
   awayScore: integer("away_score"),
   finished: boolean("finished").notNull().default(false),
+  // Momento em que o jogo foi encerrado pela primeira vez. Define a ordem do
+  // acumulado (rollover) entre jogos do mesmo horario: encerrou primeiro,
+  // conta primeiro. Fica null enquanto o jogo nao foi encerrado.
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

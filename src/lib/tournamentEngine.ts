@@ -322,11 +322,38 @@ export function calculateTournamentFinance(
   state: AppState,
 ): TournamentFinanceSummary {
   const participantCount = participants.length;
-  const sortedGames = [...games].sort(
-    (left, right) =>
-      new Date(left.kickoff).getTime() - new Date(right.kickoff).getTime(),
-  );
   const resultMap = getResultMap(state.results);
+  // O acumulado (rollover) flui pela ordem cronologica dos jogos. Quando dois
+  // jogos tem o MESMO horario de inicio, o desempate passa a ser a ordem real
+  // de encerramento (finishedAt): quem foi encerrado primeiro conta primeiro,
+  // entao o acumulado de um jogo sem acertadores pode cair no outro. Sem
+  // finishedAt (jogos antigos ou ainda nao encerrados) cai no numero do jogo.
+  const sortedGames = [...games].sort((left, right) => {
+    const leftKickoff = new Date(left.kickoff).getTime();
+    const rightKickoff = new Date(right.kickoff).getTime();
+
+    if (leftKickoff !== rightKickoff) {
+      return leftKickoff - rightKickoff;
+    }
+
+    const leftFinishedAt = resultMap.get(left.id)?.finishedAt ?? null;
+    const rightFinishedAt = resultMap.get(right.id)?.finishedAt ?? null;
+
+    if (leftFinishedAt && rightFinishedAt) {
+      const diff =
+        new Date(leftFinishedAt).getTime() - new Date(rightFinishedAt).getTime();
+
+      if (diff !== 0) {
+        return diff;
+      }
+    } else if (leftFinishedAt && !rightFinishedAt) {
+      return -1;
+    } else if (!leftFinishedAt && rightFinishedAt) {
+      return 1;
+    }
+
+    return left.matchNumber - right.matchNumber;
+  });
   const winningsByUser = Object.fromEntries(
     participants.map((participant) => [participant.id, 0] as const),
   ) as Record<string, number>;

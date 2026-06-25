@@ -2216,6 +2216,7 @@ export function BolaoApp({
             ? parseScoreInput(value)
             : existingResult?.awayScore ?? null,
         finished: existingResult?.finished ?? false,
+        finishedAt: existingResult?.finishedAt ?? null,
       };
 
       return {
@@ -2239,6 +2240,11 @@ export function BolaoApp({
         homeScore: existingResult?.homeScore ?? null,
         awayScore: existingResult?.awayScore ?? null,
         finished,
+        // Marca/limpa o encerramento na hora para o acumulado refletir a ordem
+        // imediatamente; o valor definitivo vem do servidor ao salvar.
+        finishedAt: finished
+          ? existingResult?.finishedAt ?? new Date().toISOString()
+          : null,
       };
 
       return {
